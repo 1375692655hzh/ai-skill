@@ -181,13 +181,6 @@ accounts:
     notes: "Allianz首席经济顾问，全球宏观大框架参考"
     enabled: true
 
-  - handle: "@zoltanposzar"
-    name: "Zoltan Pozsar"
-    homepage: "https://x.com/zoltanposzar"
-    priority: medium
-    notes: "全球流动性、美元体系，流动性与地缘金融视角"
-    enabled: true
-
   # ════════════════════════════════════════════════════════
   # 三、技术 + 综合分析（非核心）
   # ════════════════════════════════════════════════════════
@@ -199,9 +192,9 @@ accounts:
     notes: "潜力股跟踪、实用风格，选股思路清晰"
     enabled: true
 
-  - handle: "@PiyasaTurkiye"
+  - handle: "@PiyasaTturkiye"
     name: "Piyasa Türkiye"
-    homepage: "https://x.com/PiyasaTurkiye"
+    homepage: "https://x.com/PiyasaTturkiye"
     priority: high
     notes: "土耳其市场综合分析，市场日历与热点汇总"
     enabled: true
