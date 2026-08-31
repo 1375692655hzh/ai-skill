@@ -6,8 +6,12 @@
   "accounts_path": "accounts.yaml",
   "template_path": "templates/curated_template.txt",
   "fetch": {
-    "provider": "xai",
+    "provider": "fxtwitter",
     "window": "yesterday_start_to_now",
+    "fxtwitter_base_url": "https://api.fxtwitter.com",
+    "fxtwitter_count": 100,
+    "fxtwitter_with_replies": true,
+    "fxtwitter_groupthreads": true,
     "timezone": "Europe/Istanbul",
     "xai_model": "x-ai/grok-build-0.1",
     "xai_base_url": "https://openrouter.ai/api/v1",
@@ -24,7 +28,8 @@
     "retry_delay_seconds": 5,
     "enable_image_understanding": true,
     "min_priority": "low",
-    "tiers": []
+    "tiers": [],
+    "fallback_provider": "xai"
   },
   "translate": {
     "enabled": true,
