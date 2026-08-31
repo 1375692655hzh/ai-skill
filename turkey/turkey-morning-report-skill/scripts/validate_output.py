@@ -186,7 +186,7 @@ def validate(text: str) -> dict:
             )
         if "成交" in stocks and ("涨幅" in stocks or "跌幅" in stocks):
             if re.search(r"成交[^\n]*涨幅|成交[^\n]*跌幅", stocks):
-                errors.append("[关键个股] 成交额与涨跌幅应换行分行，不要挤同一行.")
+                warnings.append("[关键个股] 成交额与涨跌幅应换行分行，不要挤同一行.")
 
     # 行业板块表现 must be fully translated — no raw Turkish words should leak.
     sectors_body = _extract_section(text, "行业板块表现")
