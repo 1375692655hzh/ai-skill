@@ -6,7 +6,7 @@ Two modes:
   --ingest-only   fetch all sources into the store (cheap, cron every 30 min)
   default         ingest → window read → prefilter → LLM digest → outputs
 
-Window semantics: [max(last_digest_ts - 5min, now - window_hours), now],
+Window start = the EARLIER of (last_digest_ts - 5min, now - window_hours), clamped to 72h;
 minus already-delivered ids — nothing repeats, nothing is lost across a
 skipped Sunday (the window automatically widens on Monday).
 """
@@ -41,11 +41,11 @@ def ingest_all(store: FlashStore, cfg: dict) -> dict:
     # --- KAP ---
     if sources_cfg.get("kap", {}).get("enabled", True):
         lookback_days = int(sources_cfg.get("kap", {}).get("ingest_lookback_days", 3))
-        from fetch_kap import fetch_kap_disclosures
-
         to_date = datetime.now(TRT).date()
         from_date = to_date - timedelta(days=lookback_days)
         try:
+            from fetch_kap import fetch_kap_disclosures
+
             items = fetch_kap_disclosures(from_date=from_date.isoformat(), to_date=to_date.isoformat())
             new = store.append(items)
             per_source["kap"] = {"ok": True, "fetched": len(items), "new": new}
@@ -56,9 +56,9 @@ def ingest_all(store: FlashStore, cfg: dict) -> dict:
 
     # --- TCMB press ---
     if sources_cfg.get("tcmb_press", {}).get("enabled", True):
-        from fetch_tcmb import fetch_tcmb_press
-
         try:
+            from fetch_tcmb import fetch_tcmb_press
+
             items = fetch_tcmb_press()
             new = store.append(items)
             per_source["tcmb_press"] = {"ok": True, "fetched": len(items), "new": new}
@@ -71,9 +71,9 @@ def ingest_all(store: FlashStore, cfg: dict) -> dict:
     for feed in sources_cfg.get("rss", []):
         if not feed.get("enabled", True):
             continue
-        from fetch_rss import fetch_feed
-
         try:
+            from fetch_rss import fetch_feed
+
             items = fetch_feed(
                 source_id=str(feed.get("id")),
                 url=str(feed.get("url")),
@@ -101,13 +101,27 @@ def ingest_all(store: FlashStore, cfg: dict) -> dict:
                     title = re.sub(r"\s+", " ", str(h.get("title") or "")).strip()
                     if not title:
                         continue
+                    # Prefer the resolved publish date (featured items carry one);
+                    # undated live ticker items fall back to first-seen time.
+                    ts_iso = now_iso
+                    pub = str(h.get("published_date") or "")[:10]
+                    if pub:
+                        try:
+                            ts_iso = (
+                                datetime.fromisoformat(pub)
+                                .replace(hour=12, tzinfo=TRT)
+                                .astimezone(timezone.utc)
+                                .isoformat()
+                            )
+                        except ValueError:
+                            pass
                     items.append(
                         {
                             "id": stable_id("bht", h.get("url") or title),
                             "source": "bht",
                             "kind": "headline",
                             "bucket": kind,
-                            "ts": now_iso,
+                            "ts": ts_iso,
                             "raw_time": str(h.get("published_date") or ""),
                             "title": title,
                             "body": title,
@@ -122,10 +136,32 @@ def ingest_all(store: FlashStore, cfg: dict) -> dict:
             per_source["bht"] = {"ok": False, "error": str(exc)[:200]}
             _log(f"[bht] FAILED: {str(exc)[:160]}")
 
-    state = store.load_state()
-    state["last_ingest_at"] = iso(utc_now())
-    state["ingest"] = per_source
-    store.save_state(state)
+    # Health snapshot lives in a SEPARATE file: the ingest-only cron can never
+    # clobber the digest checkpoint in state.json (audit H2/H3).
+    ingest_state = {}
+    if store.ingest_state_file.exists():
+        try:
+            ingest_state = json.loads(store.ingest_state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            ingest_state = {}
+    streaks = ingest_state.get("fail_streaks", {})
+    for name, info in per_source.items():
+        key = name.lower()
+        streaks[key] = 0 if info.get("ok") else streaks.get(key, 0) + 1
+    ingest_state["last_ingest_at"] = iso(utc_now())
+    ingest_state["ingest"] = per_source
+    ingest_state["fail_streaks"] = streaks
+    for name, n in streaks.items():
+        if n >= 6:  # ~3h of consecutive failures at 30-min cadence
+            _log(f"WARNING: source '{name}' failed {n} consecutive ingests — check health")
+    # Once a day: drop store items older than 35 days (windows never exceed 72h).
+    today = datetime.now(TRT).strftime("%Y-%m-%d")
+    if ingest_state.get("last_prune_date") != today:
+        dropped = store.prune()
+        if dropped:
+            _log(f"store pruned: -{dropped} items older than 35d")
+        ingest_state["last_prune_date"] = today
+    store.save_ingest_state(ingest_state)
 
     new_total = sum(v.get("new", 0) for v in per_source.values())
     return {"sources": per_source, "new": new_total}
@@ -154,12 +190,18 @@ def run_digest(
     window_hours = float(force_window_hours or cfg.get("window_hours", 24))
     min_items = int(cfg.get("min_items_for_digest", 5))
 
-    state = store.load_state()
-    delivered = set(state.get("delivered_ids") or [])
-    if force_refresh or force_window_hours:
-        # Redo today's digest / event-day short window: ignore delivered set.
-        delivered = set()
-    window_start, window_end = store.resolve_window(window_hours=window_hours)
+    if force_window_hours:
+        # Event-day short window: strictly [now - hours, now]; cursor bypassed
+        # and delivered ignored so the short run really is short (audit H2).
+        window_end = utc_now()
+        window_start = window_end - timedelta(hours=force_window_hours)
+        delivered: set[str] = set()
+    else:
+        state = store.load_state()
+        delivered = set(state.get("delivered_ids") or [])
+        if force_refresh:
+            delivered = set()
+        window_start, window_end = store.resolve_window(window_hours=window_hours)
     _log(
         f"Window: {window_start.astimezone(TRT).strftime('%m-%d %H:%M')} → "
         f"{window_end.astimezone(TRT).strftime('%m-%d %H:%M')} TRT "
@@ -237,9 +279,19 @@ def run_digest(
             "before generating the digest (fail fast, no silent 401)."
         )
 
-    content, result = generate_with_validation(prompt, llm_cfg, validate)
+    from validate_output import SOFT_ERROR_MARKERS
+
+    cal_dates = [str(ev.get("date", "")) for ev in (calendar_events or [])]
+    if force_window_hours:
+        def validate_fn(text: str) -> dict:
+            return validate(text, min_items=3, min_chars=300, calendar_dates=cal_dates)
+    else:
+        def validate_fn(text: str) -> dict:
+            return validate(text, calendar_dates=cal_dates)
+
+    content, result = generate_with_validation(prompt, llm_cfg, validate_fn)
     soft_failure = bool(content) and bool(result.get("errors")) and all(
-        "来源归属" in e or "star markers" in e for e in result["errors"]
+        any(marker in e for marker in SOFT_ERROR_MARKERS) for e in result["errors"]
     )
     if content is None or not (result.get("ok") or soft_failure):
         if content:
@@ -256,7 +308,10 @@ def run_digest(
 
     content = _format_sections(content)
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_file = output_dir / f"{date_label}_flash_news_zh.md"
+    # Event-day short runs get their own file; the main daily digest is never
+    # overwritten by them (audit H2/M4).
+    name_suffix = "_event" if force_window_hours else ""
+    out_file = output_dir / f"{date_label}_flash_news{name_suffix}_zh.md"
     out_file.write_text(content, encoding="utf-8")
     _log(f"Full digest written: {out_file}")
 
@@ -301,7 +356,7 @@ def run_digest(
             if marker > 0:
                 brief = brief[marker:]
             brief = re.sub(r"\n{2,}", "\n", brief).strip() + "\n"
-            brief_file = output_dir / f"{date_label}_flash_news_brief_zh.md"
+            brief_file = output_dir / f"{date_label}_flash_news{name_suffix}_brief_zh.md"
             brief_file.write_text(brief, encoding="utf-8")
             _log(f"Brief written: {brief_file}")
         else:
@@ -349,7 +404,7 @@ def _calendar_in_scope(cfg: dict, window_end) -> list[dict]:
             d = _date.fromisoformat(raw)
         except ValueError:
             continue
-        if -1 <= (d - today).days <= 3:
+        if 0 <= (d - today).days <= 3:
             out.append(ev)
     return out
 

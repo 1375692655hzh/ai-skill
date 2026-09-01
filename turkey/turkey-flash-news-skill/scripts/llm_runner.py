@@ -65,17 +65,22 @@ def generate_with_validation(
         or "start a new line" in e
         or "consecutive lines" in e
         or "国际新闻" in e
+        or "missing section" in e
+        or "star-order" in e
+        or "found forbidden" in e
+        or "list bullet" in e
+        or "numbered list" in e
+        or "found emoji" in e
     ]
     if not validation["ok"] and (length_errors or structure_errors):
         fix_prompt = (
             prompt
             + "\n\n【重要修订】你上一版草稿结构/字数不合格："
             + "；".join(structure_errors + length_errors)
-            + "。请重写整篇："
-            "【关键个股】【行业板块表现】只复述BHT事实卡；【汇市与大宗商品】只复述最新报价事实；"
-            "【国际新闻】只复述国际新闻素材卡，每条新闻独占一行共2–3行；"
-            "【今日操作参考】写成三行：仓位：……。\\n点位：……。\\n回避：……。；"
-            "只要换行不要空行；其余格式铁律不变。"
+            + "。请按本模板重写整篇：星级快讯流 8–12 个单元，每单元=【★★★/★★/★】一行简介（含关键数字）"
+            "+紧跟一行详情（1–3句，必须使用素材卡里的数字与摘要）；全流按重要性降序；"
+            "例行公告合并为最后一条低星级单元；文末【明日关注】（只依据事件日历卡）+风险提示；"
+            "条目间空行、单元内部只要换行；其余格式铁律不变。"
         )
         try:
             output = call_llm(

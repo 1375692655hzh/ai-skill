@@ -40,7 +40,7 @@ def call_llm(
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "You are a Turkish market analyst writing a Chinese morning briefing."},
+            {"role": "system", "content": "You are a Turkish market analyst writing a Chinese flash-news digest."},
             {"role": "user", "content": prompt},
         ],
         "temperature": temperature,

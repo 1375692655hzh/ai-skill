@@ -44,12 +44,16 @@ def stable_id(*parts: Any) -> str:
 
 
 class FlashStore:
-    def __init__(self, cache_dir: Path, delivered_cap: int = 5000):
+    def __init__(self, cache_dir: Path, delivered_cap: int = 5000, max_window_hours: float = 72.0):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.store_file = self.cache_dir / "store.jsonl"
         self.state_file = self.cache_dir / "state.json"
+        # Ingest-only cron writes its health snapshot to a SEPARATE file so it
+        # can never clobber the digest checkpoint (state.json) in a race.
+        self.ingest_state_file = self.cache_dir / "state.ingest.json"
         self.delivered_cap = int(delivered_cap)
+        self.max_window_hours = float(max_window_hours)
 
     # ---------------- state ----------------
 
@@ -62,9 +66,14 @@ class FlashStore:
             return {}
 
     def save_state(self, state: dict[str, Any]) -> None:
-        tmp = self.state_file.with_suffix(".tmp")
+        tmp = self.state_file.with_name(f"state.json.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, self.state_file)
+
+    def save_ingest_state(self, state: dict[str, Any]) -> None:
+        tmp = self.ingest_state_file.with_name(f"state.ingest.json.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, self.ingest_state_file)
 
     # ---------------- store ----------------
 
@@ -92,6 +101,37 @@ class FlashStore:
                     continue
         return ids
 
+    def prune(self, *, max_age_days: int = 35) -> int:
+        """Drop items older than max_age_days (digest windows never exceed 72h).
+        Returns count removed; atomic rewrite via pid-suffixed temp file."""
+        if not self.store_file.exists():
+            return 0
+        cutoff = utc_now() - timedelta(days=max_age_days)
+        kept: list[dict[str, Any]] = []
+        dropped = 0
+        with self.store_file.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    dropped += 1
+                    continue
+                ts = parse_iso(item.get("ts") or "")
+                if ts is not None and ts < cutoff:
+                    dropped += 1
+                    continue
+                kept.append(item)
+        if dropped:
+            tmp = self.store_file.with_name(f"store.jsonl.{os.getpid()}.tmp")
+            with tmp.open("w", encoding="utf-8") as fh:
+                for item in kept:
+                    fh.write(json.dumps(item, ensure_ascii=False) + "\n")
+            os.replace(tmp, self.store_file)
+        return dropped
+
     def read_all(self) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         if not self.store_file.exists():
@@ -115,14 +155,18 @@ class FlashStore:
         exclude_ids: Optional[set[str]] = None,
     ) -> list[dict[str, Any]]:
         exclude_ids = exclude_ids or set()
+        seen_ids: set[str] = set()
         out: list[dict[str, Any]] = []
         for it in self.read_all():
-            if it.get("id") in exclude_ids:
-                continue
+            iid = it.get("id")
+            if iid in exclude_ids or (iid and iid in seen_ids):
+                continue  # exclude delivered; also guard rare concurrent-append dupes
             ts = parse_iso(it.get("ts") or "")
             if ts is None:
                 continue
             if window_start <= ts <= window_end:
+                if iid:
+                    seen_ids.add(iid)
                 out.append(it)
         out.sort(key=lambda x: x.get("ts") or "")
         return out
@@ -132,7 +176,10 @@ class FlashStore:
     def resolve_window(
         self, *, window_hours: float, overlap_minutes: float = 5.0
     ) -> tuple[datetime, datetime]:
-        """[max(last_digest - overlap, now - window_hours), now] — cursor with a floor."""
+        """Window start = the EARLIER of (last_digest - overlap, now - window_hours):
+        covers everything since the last digest, with window_hours as the minimum
+        lookback (so a skipped Sunday widens Monday automatically). Clamped to
+        max_window_hours after long outages to avoid replaying stale history."""
         now = utc_now()
         state = self.load_state()
         last = parse_iso(state.get("last_digest_ts") or "")
@@ -140,6 +187,8 @@ class FlashStore:
         start = floor
         if last is not None:
             start = min(last - timedelta(minutes=overlap_minutes), floor)
+        ceiling = now - timedelta(hours=self.max_window_hours)
+        start = max(start, ceiling)
         return start, now
 
     def commit_digest(self, *, window_end: datetime, item_ids: list[str]) -> None:

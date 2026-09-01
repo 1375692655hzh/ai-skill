@@ -25,7 +25,10 @@ def _kap_card(items: list[dict[str, Any]]) -> str:
     for it in items:
         tier = it.get("tier") or "P2"
         mark = "★" if tier == "P0" else " "
-        lines.append(f"{mark} {_fmt_ts(it.get('ts') or '')} | {it.get('body','')[:160]}")
+        body = it.get("body", "")
+        # Wire-enriched entries carry the substance the LLM needs for details.
+        limit = 400 if "【电讯补充】" in body else 220
+        lines.append(f"{mark} {_fmt_ts(it.get('ts') or '')} | {body[:limit]}")
     return "\n".join(lines)
 
 
@@ -35,7 +38,8 @@ def _rss_card(items: list[dict[str, Any]]) -> str:
     lines = []
     for it in items:
         src = str(it.get("source") or "").upper()
-        lines.append(f"- [{src}] {_fmt_ts(it.get('ts') or '')} | {it.get('title','')[:160]}")
+        # body = title + summary[:300]; the summary is what feeds 详情 — keep it.
+        lines.append(f"- [{src}] {_fmt_ts(it.get('ts') or '')} | {it.get('body','')[:320]}")
     return "\n".join(lines)
 
 

@@ -144,9 +144,14 @@ def prefilter(
         elif it.get("kind") == "rss":
             rss.append(dict(it, tier="P1"))
 
-    # KAP: keep every P0; trim P2 by recency when over cap.
+    # KAP: cap the card. P0 is preferred, but P0 itself is trimmed by recency
+    # too (earnings-season floods can exceed the cap on their own).
     if len(kap) > kap_cap:
-        p0 = [x for x in kap if x["tier"] == "P0"]
+        p0 = sorted(
+            (x for x in kap if x["tier"] == "P0"),
+            key=lambda x: x.get("ts") or "",
+            reverse=True,
+        )[:kap_cap]
         p2 = sorted(
             (x for x in kap if x["tier"] != "P0"),
             key=lambda x: x.get("ts") or "",
