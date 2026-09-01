@@ -1,0 +1,95 @@
+{
+  "workdir": ".",
+  "output_dir": "output",
+  "cache_dir": ".cache/turkey-flash-news",
+  "template_path": "templates/flash_news_template.txt",
+  "window_hours": 24,
+  "min_items_for_digest": 5,
+  "skip_sunday": true,
+  "sources": {
+    "kap": {
+      "enabled": true,
+      "ingest_lookback_days": 3
+    },
+    "tcmb_press": {
+      "enabled": true
+    },
+    "tcmb_fx": {
+      "enabled": true
+    },
+    "bht_headlines": {
+      "enabled": true
+    },
+    "rss": [
+      {
+        "id": "cnbce",
+        "url": "https://www.cnbce.com/rss",
+        "lang": "tr",
+        "enabled": true
+      },
+      {
+        "id": "foreks",
+        "url": "https://www.foreks.com/rss/",
+        "lang": "tr",
+        "enabled": true
+      },
+      {
+        "id": "dunya",
+        "url": "https://www.dunya.com/rss",
+        "lang": "tr",
+        "enabled": true
+      },
+      {
+        "id": "dailysabah",
+        "url": "https://www.dailysabah.com/rssfeed/business",
+        "lang": "en",
+        "enabled": true
+      },
+      {
+        "id": "sabah",
+        "url": "https://www.sabah.com.tr/rss/ekonomi.xml",
+        "lang": "tr",
+        "enabled": true
+      }
+    ]
+  },
+  "prefilter": {
+    "kap_cap": 120,
+    "rss_cap_per_source": 40
+  },
+  "llm": {
+    "provider": "minimax",
+    "model": "MiniMax-M3",
+    "api_key_env": "MINIMAX_API_KEY",
+    "base_url": "https://api.minimaxi.com/v1",
+    "temperature": 0.3,
+    "max_tokens": 8000
+  },
+  "brief": {
+    "enabled": true,
+    "max_tokens": 2000,
+    "temperature": 0.3
+  },
+  "calendar": [
+    {
+      "date": "2026-09-03",
+      "event": "TÜİK 8月CPI/PPI（10:00 TRT=北京15:00，每月3日逢周末顺延）"
+    },
+    {
+      "date": "2026-09-10",
+      "event": "TCMB PPK 议息决议（14:00 TRT=北京19:00，2026年第6次）"
+    },
+    {
+      "date": "2026-09-17",
+      "event": "TCMB 上次PPK会议纪要（约14:00 TRT）"
+    },
+    {
+      "date": "2026-10-22",
+      "event": "TCMB PPK 议息决议（14:00 TRT）"
+    },
+    {
+      "date": "2026-12-10",
+      "event": "TCMB PPK 议息决议（14:00 TRT）"
+    }
+  ]
+}
