@@ -41,8 +41,12 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
         errors.append(f"占位句凑数（无观点应整段省略）: {m.group(0)[:50]}")
 
     # 个股节为行式排版（聊天窗口友好）：每只股票一个块，首行「名称｜定位｜决策」
-    # 两个全角分隔符，其后为观点行，空行分块。docx 渲染时再转 4 列表格。
+    # 恰好两个全角分隔符，其后为观点行，空行分块。docx 渲染时再转 4 列表格。
     stock_zone = text.split("## 二、个股分析", 1)[-1]
+    # Drop the remainder of the HEADING line: the template asks for a suffixed
+    # title (（仅保留有实质判断的标的）) which otherwise lands in the first
+    # block and trips the field check (review P0-1).
+    stock_zone = stock_zone.split("\n", 1)[1] if "\n" in stock_zone else ""
     stock_zone = stock_zone.split("\n## ", 1)[0]
     blocks = [
         blk.strip()
@@ -54,23 +58,37 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
     bad_heads = 0
     flow_only = 0
     seen_tickers: list[str] = []
+    INDEX_RE = re.compile(r"^(?:XU\s?\d+|BIST\s?\d*|XBANK)$")
     for blk in blocks:
-        first = blk.splitlines()[0].strip()
-        # chat-friendly block: first line carries 名称｜定位｜决策 (no collapse —
-        # collapsing merged detail lines into the field check and let 2-field
-        # heads pass when the body happened to contain ｜).
+        lines = [ln.strip() for ln in blk.splitlines() if ln.strip()]
+        first = lines[0]
+        # Blocks must be separated by BLANK lines: a stock head nested in a
+        # non-first line means the LLM ran blocks together (review P1-1).
+        for nested in lines[1:]:
+            if nested.count("｜") >= 2:
+                errors.append(
+                    "个股块之间必须空行分隔（检测到块内嵌套股票首行）: "
+                    + nested[:40]
+                )
+                break
+        # chat-friendly block: first line carries 名称｜定位｜决策 (no collapse).
         fields = [f.strip() for f in first.split("｜")]
-        if len(fields) < 3:
+        if len(fields) != 3:
             bad_heads += 1
             continue
-        ticker = fields[0].split()[0].upper() if fields[0].split() else ""
-        if ticker in seen_tickers:
+        if len(lines) < 2:
+            errors.append(f"个股块缺少观点行（无实质判断应整块删除）: {first[:40]}")
+            continue
+        norm_key = re.sub(r"\s+", "", fields[0]).upper()
+        if norm_key in seen_tickers:
             errors.append(f"个股块重复：{fields[0][:40]} — 同一股票必须合并为一块.")
             continue
-        if ticker in ("XU100", "BIST", "XU030", "XBANK"):
-            errors.append(f"指数 {ticker} 不得进入个股分析（指数观点放热点资讯）.")
+        # Index rows: match a LEADING index token ("XU 100 BIST指数"…
+        # whole-field anchoring missed prefixed variants — review P2-2).
+        if INDEX_RE.match(norm_key) or re.match(r"^(?:XU\s?\d+|BIST\s?\d*|XBANK)(?:\s|$|)", fields[0].upper()):
+            errors.append(f"指数 {fields[0]} 不得进入个股分析（指数观点放热点资讯）.")
             continue
-        seen_tickers.append(ticker)
+        seen_tickers.append(norm_key)
         stock_rows += 1
         if "不入表" in blk or "按规则排除" in blk:
             warnings.append(f"个股块含自我说明（应直接删除）: {first[:60]}")

@@ -143,7 +143,7 @@ def main() -> int:
     from make_docx import markdown_to_docx, qc_docx
 
     markdown_to_docx(content, docx_path, font=str(docx_cfg.get("font", "Noto Sans CJK SC")))
-    qc = qc_docx(docx_path)
+    qc = qc_docx(docx_path, expect_stock_table=(result.get("stock_rows", 0) > 0))
     if qc["ok"]:
         _log(f"DOCX written + QC passed: {docx_path} (stock_rows={qc['stock_rows']})")
     else:

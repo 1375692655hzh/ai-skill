@@ -45,10 +45,16 @@ def _stock_lines_to_table(md_text: str) -> str:
     heading, body = m.group(1), m.group(2)
     rows = []
     tail_blocks = []
+
+    def _cell(text: str) -> str:
+        # Half-width pipes inside content would split into extra columns
+        # (review P2-1) — normalize to full-width ｜.
+        return text.replace("|", "｜")
+
     for blk in re.split(r"\n\s*\n", body):
         stripped = blk.strip()
-        if not stripped:
-            continue
+        if not stripped or re.fullmatch(r"-{3,}", stripped):
+            continue  # drop stray --- separators instead of tail-collecting them
         lines = [ln.strip() for ln in stripped.splitlines() if ln.strip()]
         if not lines or "｜" not in lines[0] or lines[0].startswith(("*", "-", "声明")):
             tail_blocks.append(stripped)  # disclaimers etc. — keep verbatim
@@ -57,8 +63,12 @@ def _stock_lines_to_table(md_text: str) -> str:
         if len(fields) < 3:
             tail_blocks.append(stripped)
             continue
-        detail = " ".join(lines[1:]) or "—"
-        rows.append("| " + " | ".join(fields[:3]) + " | " + detail + " |")
+        if len(fields) > 3:
+            # >3 fields: fold the extras into the third (决策) so nothing is
+            # silently dropped by fields[:3].
+            fields = fields[:2] + ["｜".join(fields[2:])]
+        detail = _cell(" ".join(lines[1:])) or "—"
+        rows.append("| " + " | ".join(_cell(f) for f in fields) + " | " + detail + " |")
     if not rows:
         return md_text
     table = (
@@ -143,8 +153,10 @@ def markdown_to_docx(md_text: str, out_path: Path, *, font: str = "Noto Sans CJK
     return out_path
 
 
-def qc_docx(path: Path) -> dict:
-    """Programmatic QC: reopen and verify structure per the layout spec."""
+def qc_docx(path: Path, *, expect_stock_table: bool = True) -> dict:
+    """Programmatic QC: reopen and verify structure per the layout spec.
+    expect_stock_table=False covers spec §17.5 days where every candidate
+    stock was (correctly) excluded and the section carries a note instead."""
     errors: list[str] = []
     doc = Document(str(path))
     paras = [p for p in doc.paragraphs if p.text.strip()]
@@ -158,7 +170,7 @@ def qc_docx(path: Path) -> dict:
         errors.append("个股分析 section missing")
     tables = doc.tables
     stock_table = tables[-1] if tables else None
-    if stock_table is None:
+    if stock_table is None and expect_stock_table:
         errors.append("stock table missing")
     else:
         if len(stock_table.columns) != 4:
