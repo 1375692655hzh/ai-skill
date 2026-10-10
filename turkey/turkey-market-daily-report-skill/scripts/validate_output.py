@@ -59,13 +59,17 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
     flow_only = 0
     seen_tickers: list[str] = []
     INDEX_RE = re.compile(r"^(?:XU\s?\d+|BIST\s?\d*|XBANK)$")
+    NESTED_HEAD_RE = re.compile(r"^[A-Z][A-Z0-9.]{1,9}(?:[\s\u3000]|$)")
     for blk in blocks:
         lines = [ln.strip() for ln in blk.splitlines() if ln.strip()]
         first = lines[0]
         # Blocks must be separated by BLANK lines: a stock head nested in a
         # non-first line means the LLM ran blocks together (review P1-1).
+        # Require a TICKER-like leading token too — quoting a大V line like
+        # "支撑8000｜阻力8300｜仓位五成" is legitimate detail, not a nested
+        # head (K3 A2 false-positive fix).
         for nested in lines[1:]:
-            if nested.count("｜") >= 2:
+            if nested.count("｜") >= 2 and NESTED_HEAD_RE.match(nested):
                 errors.append(
                     "个股块之间必须空行分隔（检测到块内嵌套股票首行）: "
                     + nested[:40]
@@ -73,7 +77,7 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
                 break
         # chat-friendly block: first line carries 名称｜定位｜决策 (no collapse).
         fields = [f.strip() for f in first.split("｜")]
-        if len(fields) != 3:
+        if len(fields) != 3 or not all(fields):
             bad_heads += 1
             continue
         if len(lines) < 2:
@@ -83,9 +87,12 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
         if norm_key in seen_tickers:
             errors.append(f"个股块重复：{fields[0][:40]} — 同一股票必须合并为一块.")
             continue
-        # Index rows: match a LEADING index token ("XU 100 BIST指数"…
-        # whole-field anchoring missed prefixed variants — review P2-2).
-        if INDEX_RE.match(norm_key) or re.match(r"^(?:XU\s?\d+|BIST\s?\d*|XBANK)(?:\s|$|)", fields[0].upper()):
+        # Index rows: whole-field match OR a leading index token with no
+        # boundary assertion — \b does not fire between ASCII and Chinese
+        # (both are \w in Unicode mode), and an earlier edit wrote a literal
+        # backspace here; prefix-only matching covers "BIST指数"/"XBANK银行指数"
+        # without either trap (K3 A4 + dispatch-layer finding).
+        if INDEX_RE.match(norm_key) or re.match(r"^(?:XU\s?\d+|BIST\s?\d*|XBANK)", fields[0].upper()):
             errors.append(f"指数 {fields[0]} 不得进入个股分析（指数观点放热点资讯）.")
             continue
         seen_tickers.append(norm_key)

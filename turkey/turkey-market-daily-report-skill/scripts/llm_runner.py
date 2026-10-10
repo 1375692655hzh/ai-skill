@@ -57,21 +57,22 @@ def generate_with_validation(
             return None, {"ok": False, "errors": [str(exc)], "warnings": []}
 
     length_errors = [e for e in validation.get("errors", []) if "too short" in e or "too long" in e]
+    # Retryable phrases mirror THIS skill's validator error strings exactly;
+    # dead phrases inherited from the close/morning lineage were dropped
+    # (K3 C10). "missing section" is deliberately NOT retried: catastrophic
+    # template violations early-return and are not worth a rewrite.
     structure_errors = [
         e
         for e in validation.get("errors", [])
-        if "structured slots" in e
-        or "too many sentences" in e
-        or "start a new line" in e
-        or "consecutive lines" in e
-        or "国际新闻" in e
-        or "个股块首行缺少" in e
+        if "个股块首行缺少" in e
         or "个股块重复" in e
         or "不得进入个股分析" in e
         or "占位句凑数" in e
         or "转载腔句式" in e
         or "个股块之间必须空行" in e
         or "个股块缺少观点行" in e
+        or "热点条数" in e
+        or "事件介绍字段缺失" in e
     ]
     if not validation["ok"] and (length_errors or structure_errors):
         fix_prompt = (
