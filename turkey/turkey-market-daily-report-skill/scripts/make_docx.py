@@ -33,7 +33,46 @@ def _repeat_header(row) -> None:
     trPr.append(el)
 
 
+def _stock_lines_to_table(md_text: str) -> str:
+    """Convert the chat-friendly stock section (TICKER 名称｜定位｜决策 + detail
+    lines, blank-line separated) into one markdown table for the Word render —
+    the colleague spec §6.1 requires a 4-column table in the DOCX."""
+    import re as _re
+
+    m = _re.search(r"(?m)^(## 二、个股分析[^\n]*)\n(.*?)(?=^## |\Z)", md_text, _re.S | _re.M)
+    if not m:
+        return md_text
+    heading, body = m.group(1), m.group(2)
+    rows = []
+    tail_blocks = []
+    for blk in re.split(r"\n\s*\n", body):
+        stripped = blk.strip()
+        if not stripped:
+            continue
+        lines = [ln.strip() for ln in stripped.splitlines() if ln.strip()]
+        if not lines or "｜" not in lines[0] or lines[0].startswith(("*", "-", "声明")):
+            tail_blocks.append(stripped)  # disclaimers etc. — keep verbatim
+            continue
+        fields = [f.strip() for f in lines[0].split("｜")]
+        if len(fields) < 3:
+            tail_blocks.append(stripped)
+            continue
+        detail = " ".join(lines[1:]) or "—"
+        rows.append("| " + " | ".join(fields[:3]) + " | " + detail + " |")
+    if not rows:
+        return md_text
+    table = (
+        heading + "\n\n"
+        "| 股票名称 | 定位 | 投资决策 | 大V分析观点 |\n"
+        "|---|---|---|---|\n" + "\n".join(rows) + "\n"
+    )
+    if tail_blocks:
+        table += "\n" + "\n\n".join(tail_blocks) + "\n"
+    return md_text[: m.start()] + table + md_text[m.end():]
+
+
 def markdown_to_docx(md_text: str, out_path: Path, *, font: str = "Noto Sans CJK SC") -> Path:
+    md_text = _stock_lines_to_table(md_text)
     doc = Document()
     section = doc.sections[0]
     section.page_width, section.page_height = Cm(21.0), Cm(29.7)  # A4

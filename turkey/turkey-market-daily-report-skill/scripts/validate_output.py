@@ -40,35 +40,50 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
     ):
         errors.append(f"占位句凑数（无观点应整段省略）: {m.group(0)[:50]}")
 
-    table = text.split("## 二、个股分析", 1)[-1]
-    rows = [
-        ln
-        for ln in table.splitlines()
-        if ln.strip().startswith("|") and not re.match(r"^\|[\s:\-|]+\|$", ln.strip())
+    # 个股节为行式排版（聊天窗口友好）：每只股票一个块，首行「名称｜定位｜决策」
+    # 两个全角分隔符，其后为观点行，空行分块。docx 渲染时再转 4 列表格。
+    stock_zone = text.split("## 二、个股分析", 1)[-1]
+    stock_zone = stock_zone.split("\n## ", 1)[0]
+    blocks = [
+        blk.strip()
+        for blk in re.split(r"\n\s*\n", stock_zone)
+        if blk.strip() and not blk.strip().startswith(("*", "-", "声明", "---"))
     ]
-    if rows:
-        bad_cols = [ln for ln in rows if len(ln.strip().strip("|").split("|")) != 4]
-        if bad_cols:
-            errors.append(f"个股表存在非4列行 {len(bad_cols)} 条，首条: {bad_cols[0][:60]}")
-        header = rows[0].strip().strip("|")
-        cells = [c.strip() for c in header.split("|")]
-        if cells[:2] != ["股票名称", "定位"]:
-            errors.append(f"个股表表头错误: {header[:60]}")
-        # Spec §8: pure fund-flow ranking rows are not substantive judgment;
-        # self-referential "不入表" rows must never appear.
-        judgment_words = ("支撑", "阻力", "突破", "跌破", "均线", "通道", "业绩", "订单", "利润", "估值", "PE", "并购", "要约", "指数调整", "MSCI", "FTSE", "低估", "高估", "产能", "负债")
-        flow_only = 0
-        for ln in rows[1:]:
-            if "不入表" in ln or "排除" in ln:
-                warnings.append(f"个股表含自我说明行（应直接删除）: {ln[:60]}")
-            has_flow = ("净资金流入" in ln or "净资金流出" in ln or "资金净流入" in ln or "资金净流出" in ln)
-            has_judgment = any(w in ln for w in judgment_words)
-            if has_flow and not has_judgment:
-                flow_only += 1
-        if flow_only:
-            warnings.append(f"个股表有 {flow_only} 行疑似纯资金榜（无实质判断词），规范 §8 不允许单独入表.")
-    else:
-        warnings.append("个股表无数据行（若X大V资料缺失属预期，否则检查）")
+    stock_rows = 0
+    judgment_words = ("支撑", "阻力", "突破", "跌破", "均线", "通道", "业绩", "订单", "利润", "估值", "PE", "并购", "要约", "指数调整", "MSCI", "FTSE", "低估", "高估", "产能", "负债")
+    bad_heads = 0
+    flow_only = 0
+    seen_tickers: list[str] = []
+    for blk in blocks:
+        first = blk.splitlines()[0].strip()
+        # chat-friendly block: first line carries 名称｜定位｜决策 (no collapse —
+        # collapsing merged detail lines into the field check and let 2-field
+        # heads pass when the body happened to contain ｜).
+        fields = [f.strip() for f in first.split("｜")]
+        if len(fields) < 3:
+            bad_heads += 1
+            continue
+        ticker = fields[0].split()[0].upper() if fields[0].split() else ""
+        if ticker in seen_tickers:
+            errors.append(f"个股块重复：{fields[0][:40]} — 同一股票必须合并为一块.")
+            continue
+        if ticker in ("XU100", "BIST", "XU030", "XBANK"):
+            errors.append(f"指数 {ticker} 不得进入个股分析（指数观点放热点资讯）.")
+            continue
+        seen_tickers.append(ticker)
+        stock_rows += 1
+        if "不入表" in blk or "按规则排除" in blk:
+            warnings.append(f"个股块含自我说明（应直接删除）: {first[:60]}")
+        has_flow = any(w in blk for w in ("净资金流入", "净资金流出", "资金净流入", "资金净流出"))
+        has_judgment = any(w in blk for w in judgment_words)
+        if has_flow and not has_judgment:
+            flow_only += 1
+    if bad_heads:
+        errors.append(f"个股块首行缺少「名称｜定位｜决策」三字段分隔: {bad_heads} 块.")
+    if flow_only:
+        warnings.append(f"个股块有 {flow_only} 个疑似纯资金榜（无实质判断词），规范 §8 不允许单独成块.")
+    if not stock_rows:
+        warnings.append("个股节无数据块（若X大V资料缺失属预期，否则检查）")
 
     length = len(re.sub(r"\s", "", text))
     if length < 1200:
@@ -79,4 +94,4 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
     for m in re.finditer(r"据[^\s，。]{2,12}(?:报道|消息|透露)", text):
         errors.append(f"转载腔句式（须内化表述）: {m.group(0)}")
 
-    return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings, "hotspots": len(hotspots), "stock_rows": max(0, len(rows) - 1)}
+    return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings, "hotspots": len(hotspots), "stock_rows": stock_rows}

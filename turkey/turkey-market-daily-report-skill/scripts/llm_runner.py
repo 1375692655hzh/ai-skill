@@ -65,6 +65,11 @@ def generate_with_validation(
         or "start a new line" in e
         or "consecutive lines" in e
         or "国际新闻" in e
+        or "个股块首行缺少" in e
+        or "个股块重复" in e
+        or "不得进入个股分析" in e
+        or "占位句凑数" in e
+        or "转载腔句式" in e
     ]
     if not validation["ok"] and (length_errors or structure_errors):
         fix_prompt = (
