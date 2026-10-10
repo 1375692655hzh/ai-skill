@@ -59,8 +59,12 @@ TIER_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
 def classify_kap(item: dict[str, Any], *, noise: list[str], p0: list[str]) -> str:
-    text = f"{item.get('title','')} {item.get('body','')}"
-    if any(re.search(p, text, re.IGNORECASE) for p in noise):
+    # Noise is judged on the subject/title only: procedural categories are
+    # named there. A substantive disclosure whose BODY mentions e.g. BISTECH
+    # must still reach the prompt (2026-10-10 audit P2-11).
+    title = item.get("title", "")
+    text = f"{title} {item.get('body', '')}"
+    if any(re.search(p, title, re.IGNORECASE) for p in noise):
         return "P3"
     if any(re.search(p, text, re.IGNORECASE) for p in p0):
         return "P0"
@@ -169,5 +173,6 @@ def prefilter(
         trimmed.extend(group[:rss_cap_per_source])
     trimmed.sort(key=lambda x: x.get("ts") or "")
 
-    tcmb = tcmb[:tcmb_cap]
+    # read_window returns ascending ts; keep the NEWEST tcmb_cap items.
+    tcmb = sorted(tcmb, key=lambda x: x.get("ts") or "", reverse=True)[:tcmb_cap]
     return {"kap": kap, "rss": trimmed, "tcmb": tcmb}

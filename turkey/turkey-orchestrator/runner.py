@@ -124,7 +124,9 @@ def run_skill(task_cfg: dict, logger: logging.Logger, extra_args: list[str] | No
     env.update(load_env_file(Path(task_cfg.get("env_file", ""))))
     env.setdefault("PYTHONIOENCODING", "utf-8")
     logger.info(f"执行 skill: {' '.join(cmd)} (cwd={cwd}) [python={sys.executable}, ver={sys.version.split()[0]}]")
-    proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8")
+    proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace",
+                          timeout=float(task_cfg.get("skill_timeout_sec", 600)))
     if proc.stdout:
         logger.info(f"skill stdout: {proc.stdout.strip()[:500]}")
     if proc.stderr:
@@ -544,7 +546,13 @@ def execute_task(cfg: dict, task_name: str, logger: logging.Logger) -> dict:
         # 推送后直接 return，循环永远到不了 attempt 2，正式版无法自动生成。
         marker = _find_bht_verify_marker(task_cfg, today_tr)
         extra_args = ["--verify-bht"] if marker else None
-        rc, out, err = run_skill(task_cfg, logger, extra_args=extra_args)
+        try:
+            rc, out, err = run_skill(task_cfg, logger, extra_args=extra_args)
+        except Exception as exc:  # noqa: BLE001
+            # 子进程崩溃（command/cwd 配错、输出解码失败、超时）按失败尝试处理，
+            # 不允许异常绕过 run.jsonl 记录与告警（2026-10-10 审查 P2-6）。
+            rc, out, err = 1, "", f"run_skill exception: {exc}"
+            logger.error(f"run_skill exception (第{attempt}/{max_retries}): {exc}")
         last_stdout, last_stderr = out, err
         parsed_tr = parse_today_tr(err)
         if parsed_tr:
@@ -619,17 +627,18 @@ def execute_task(cfg: dict, task_name: str, logger: logging.Logger) -> dict:
         write_run_log(log_dir, entry)
         return entry
 
-    # close_report 专用：生成成功后记录素材指纹，供下次补跑判断素材是否有变化
-    if close_fingerprint and today_tr:
+    entry = _do_push(cfg, task_cfg, task_name, today_tr,
+                     brief_file, full_file, logger, started, log_dir, "ok")
+    # close_report 专用：推送成功后才记录素材指纹。指纹若在推送前保存，
+    # 推送瞬断会被下一轮"指纹无变化"去重永久吞掉（2026-10-10 审查 P1-1）。
+    if close_fingerprint and today_tr and entry.get("status") in ("ok", "ok_fallback"):
         try:
             fp = _extract_close_report_fingerprint(task_cfg, today_tr)
             _save_source_fingerprint(task_cfg, today_tr, fp)
             logger.info(f"已记录素材指纹: {today_tr} -> BHT id={fp.get('bht_article_id')}")
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"记录素材指纹失败(不影响推送): {exc}")
-
-    return _do_push(cfg, task_cfg, task_name, today_tr,
-                    brief_file, full_file, logger, started, log_dir, "ok")
+    return entry
 
 
 def _do_push(cfg: dict, task_cfg: dict, task_name: str, today_tr: str | None,
@@ -643,6 +652,10 @@ def _do_push(cfg: dict, task_cfg: dict, task_name: str, today_tr: str | None,
     title_prefix = task_cfg.get("title_prefix", task_name)
 
     text_ok = True
+    if brief_file is None and not brief_optional and full_file is not None:
+        # brief 配置了但 skill 没产出（如 flash 的 brief 校验失败只打日志仍返回 0）：
+        # 只发文件、无文本摘要是静默降级，必须留痕（2026-10-10 审查 P2-4）。
+        logger.warning(f"{task_name}: brief 文件缺失且 brief_optional=False — 本次仅推送文件")
     if brief_file:
         # 有简报版：直接发文本
         text_content = brief_file.read_text(encoding="utf-8").strip()

@@ -337,10 +337,16 @@ def filter_window(posts: list[dict], window_start: datetime, window_end: datetim
 
 
 def dedupe_posts(posts: list[dict]) -> list[dict]:
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     out: list[dict] = []
     for p in posts:
-        key = p.get("id") or p.get("url") or (str(p.get("account")) + "|" + (p.get("text") or "")[:80])
+        # Scope by account: the same status id can legitimately appear under a
+        # reposter's own feed (A retweeting B); dropping by id alone would
+        # misattribute the surviving copy.
+        key = (
+            str(p.get("account") or "").lower(),
+            str(p.get("id") or p.get("url") or (p.get("text") or "")[:80]),
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -704,6 +710,13 @@ def _fxt_iso_time(status: dict[str, Any]) -> str:
     return str(status.get("created_at") or "")
 
 
+def _fxt_text(status: dict[str, Any]) -> str:
+    raw = status.get("raw_text")
+    if isinstance(raw, dict):
+        return str(raw.get("text") or "")
+    return str(status.get("text") or "")
+
+
 def _fxt_to_item(status: dict[str, Any]) -> dict[str, Any]:
     """Map a FxTwitter v2 status dict onto the normalize_post() input shape."""
     author = status.get("author") if isinstance(status.get("author"), dict) else {}
@@ -711,8 +724,9 @@ def _fxt_to_item(status: dict[str, Any]) -> dict[str, Any]:
     quoted_item = None
     if quote:
         q_author = quote.get("author") if isinstance(quote.get("author"), dict) else {}
+        q_raw = quote.get("raw_text")
         quoted_item = {
-            "text": (quote.get("raw_text") or {}).get("text") or quote.get("text") or "",
+            "text": (q_raw.get("text") if isinstance(q_raw, dict) else "") or quote.get("text") or "",
             "author": {
                 "screen_name": q_author.get("screen_name") or "",
                 "name": q_author.get("name") or "",
@@ -722,7 +736,7 @@ def _fxt_to_item(status: dict[str, Any]) -> dict[str, Any]:
         "id": str(status.get("id") or ""),
         "url": status.get("url") or "",
         "created_at": _fxt_iso_time(status),
-        "text": (status.get("raw_text") or {}).get("text") or status.get("text") or "",
+        "text": _fxt_text(status),
         "author": {
             "screen_name": author.get("screen_name") or "",
             "name": author.get("name") or "",
@@ -812,6 +826,12 @@ def fetch_account_posts_fxtwitter(
                     _progress(f"  retry {attempt + 1} for {account.clean_handle}: {last_error[:120]}")
                     time.sleep(retry_delay)
         if data is None:
+            # Page 2+ failure: keep what earlier pages already yielded (partial
+            # success) instead of discarding it — the caller treats
+            # (failure AND no posts) as a full account failure.
+            if all_posts:
+                _progress(f"  {account.clean_handle}: page failed after {len(all_posts)} posts, keeping partial")
+                return all_posts, None, True
             return [], {
                 "handle": account.clean_handle,
                 "provider": "fxtwitter",
@@ -987,6 +1007,10 @@ def fetch_account_posts_xai(
                     _progress(f"  retry {attempt + 1} for {account.clean_handle}: {attempt_error[:120]}")
                     time.sleep(retry_delay)
         if response is None:
+            # Page 2+ failure: keep earlier pages' posts (partial success).
+            if all_posts:
+                _progress(f"  {account.clean_handle}: page failed after {len(all_posts)} posts, keeping partial")
+                return all_posts, None, True
             return [], {
                 "handle": account.clean_handle,
                 "provider": "xai",
@@ -1142,12 +1166,20 @@ def fetch_and_cache(
     primary_provider = str(fetch_cfg.get("provider") or "xai").lower()
     fallback_provider = str(fetch_cfg.get("fallback_provider") or "").lower()
     if cache_file.exists() and not force_refresh:
-        cached = json.loads(cache_file.read_text(encoding="utf-8"))
+        try:
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            cached = None  # truncated/corrupt cache (killed mid-write) = miss
         if (
-            cached.get("posts") is not None
+            isinstance(cached, dict)
+            and cached.get("posts") is not None
             and cached.get("window") == "yesterday_start_to_now"
             and cached.get("since")
             and cached.get("provider") == primary_provider
+            # A failed fetch must not poison the day: all-failure runs carry
+            # failures and zero posts — re-fetch instead of serving the cache.
+            and not cached.get("failures")
+            and (cached.get("posts") or cached.get("fail_accounts", 0) == 0)
         ):
             return cached
 
@@ -1170,11 +1202,10 @@ def fetch_and_cache(
     if fallback_provider and fallback_provider != primary_provider:
         providers.append(fallback_provider)
 
-    if primary_provider == "xai" and not api_key:
-        raise RuntimeError(
-            f"Missing {api_key_env}. Set it in the environment or skill .env "
-            "(get a key at https://console.x.ai)."
-        )
+    # No up-front key check here: the provider loop below rules on each
+    # provider individually (xai without a key is skipped, fxtwitter still
+    # runs). A precheck raise would kill the fallback chain when
+    # primary=xai is unkeyed but fallback=fxtwitter needs no key.
 
     provider_order: list[str] = []
     provider_hits: dict[str, int] = {}
@@ -1282,7 +1313,12 @@ def fetch_and_cache(
     result["accounts_path"] = str(accounts_path)
     result["lookback_rule"] = "yesterday_start_to_now"
     result["timezone"] = tz_name
-    cache_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Persist only non-poisoning results: a failed fetch (no posts + failures)
+    # must not become tomorrow's cache hit. Atomic write against mid-run kills.
+    if window_posts or not merged_failures:
+        tmp = cache_file.with_name(f"{cache_file.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, cache_file)
     return result
 
 

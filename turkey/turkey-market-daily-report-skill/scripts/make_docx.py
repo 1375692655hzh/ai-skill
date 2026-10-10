@@ -62,12 +62,19 @@ def markdown_to_docx(md_text: str, out_path: Path, *, font: str = "Noto Sans CJK
             i += 1
             continue
         if ln.strip().startswith("|"):
-            # collect the table block
+            # collect the table block; separator rows (---|---) are dropped.
+            # Guard: a DATA row of bare dashes (| - | - | - | - |) also matches
+            # the dash pattern — only treat it as a separator before any data
+            # rows exist (2026-10-10 audit P2-13).
             block: list[list[str]] = []
             while i < len(lines) and lines[i].strip().startswith("|"):
                 raw = lines[i].strip().strip("|")
                 cells = [c.strip() for c in raw.split("|")]
-                if not re.match(r"^[\s:\-]+$", raw.replace("|", "")):
+                is_separator = (
+                    len(block) <= 1
+                    and re.match(r"^[\s:\-]+$", raw.replace("|", ""))
+                )
+                if not is_separator:
                     block.append(cells)
                 i += 1
             if block:

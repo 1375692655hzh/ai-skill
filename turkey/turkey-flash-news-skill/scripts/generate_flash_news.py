@@ -184,7 +184,6 @@ def run_digest(
     from validate_output import validate
     from validate_brief_output import validate_brief
     from llm_runner import generate_with_validation, generate_brief_with_retry
-    from call_llm import call_llm
 
     skill_dir, workdir, output_dir, cache_dir, template_path = paths
     window_hours = float(force_window_hours or cfg.get("window_hours", 24))
@@ -388,7 +387,7 @@ def _load_env_file(skill_dir: Path) -> None:
 
 
 def _calendar_in_scope(cfg: dict, window_end) -> list[dict]:
-    """Config calendar entries dated within [now-12h, now+72h] (TRT dates)."""
+    """Config calendar entries dated today..+3 days (TRT calendar dates)."""
     events = cfg.get("calendar") or []
     if not isinstance(events, list):
         return []

@@ -115,7 +115,13 @@ def collect_inputs(cfg: dict, now: Optional[datetime] = None) -> dict[str, Any]:
         "paraborsa": prev_day,
     }
     for key in CORE_KEYS + OPTIONAL_KEYS + PREV_KEYS:
-        hit = find_input(roots, patterns, key, date_for_key[key])
+        # PREV keys are strictly the previous trading day (spec §3.2/§3.3):
+        # silently serving a 4-day-old close report as "前一日" would poison
+        # the report's date discipline (2026-10-10 audit P2-10).
+        hit = find_input(
+            roots, patterns, key, date_for_key[key],
+            fallback_days=0 if key in PREV_KEYS else 4,
+        )
         if hit is None:
             bucket = (
                 result["missing_core"]

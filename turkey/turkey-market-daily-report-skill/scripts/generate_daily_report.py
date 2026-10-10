@@ -72,7 +72,7 @@ def main() -> int:
     if "x_influencer" in missing or not has_anchor:
         _log(
             f"核心输入不足（missing={missing}）。规范要求：X大V全文必须有；"
-            "Info日报与早报至少其一（同事锚定顺序 info_daily→daily_briefing）。"
+            "Info日报与早报至少其一（同事锚定顺序 info_daily→morning_briefing）。"
             "不生成虚假热点/个股表，请先跑对应上游 skill。"
         )
         return 2
@@ -80,7 +80,20 @@ def main() -> int:
     target = bundle["target_date"]
     md_path = output_dir / f"{target.isoformat()}_market_daily_zh.md"
 
-    if md_path.exists() and not args.force_refresh and not args.no_llm:
+    docx_cfg = cfg.get("docx", {})
+    docx_name = docx_cfg.get("filename", "turkey_daily_{yyyymmdd}.docx").replace(
+        "{yyyymmdd}", target.strftime("%Y%m%d")
+    )
+    docx_path = output_dir / docx_name
+    # Skip only when BOTH artifacts exist: a QC-failed docx left on disk must
+    # not let a retry round claim success (2026-10-10 audit P1-3).
+    if (
+        md_path.exists()
+        and docx_path.exists()
+        and not args.force_refresh
+        and not args.no_llm
+        and not args.md_only
+    ):
         _log(f"{md_path.name} 已存在 — 用 --force-refresh 重做。")
         return 0
 
@@ -129,17 +142,18 @@ def main() -> int:
 
     from make_docx import markdown_to_docx, qc_docx
 
-    docx_cfg = cfg.get("docx", {})
-    docx_name = docx_cfg.get("filename", "turkey_daily_{yyyymmdd}.docx").replace(
-        "{yyyymmdd}", target.strftime("%Y%m%d")
-    )
-    docx_path = output_dir / docx_name
     markdown_to_docx(content, docx_path, font=str(docx_cfg.get("font", "Noto Sans CJK SC")))
     qc = qc_docx(docx_path)
     if qc["ok"]:
         _log(f"DOCX written + QC passed: {docx_path} (stock_rows={qc['stock_rows']})")
     else:
-        _log(f"DOCX QC FAILED: {qc['errors']} — file at {docx_path} needs a fix pass.")
+        # Delete the bad artifact: a QC-failed docx on disk would let the
+        # orchestrator's locate_outputs treat today as done (2026-10-10 audit P1-3).
+        try:
+            docx_path.unlink()
+        except OSError:
+            pass
+        _log(f"DOCX QC FAILED: {qc['errors']} — bad file deleted, fix and re-run.")
         return 1
     return 0
 

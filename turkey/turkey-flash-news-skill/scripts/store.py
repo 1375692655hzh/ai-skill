@@ -34,9 +34,14 @@ def parse_iso(value: str) -> Optional[datetime]:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if dt.tzinfo is None:
+        # tz-less timestamps (hand imports / external data) would crash
+        # aware-vs-naive comparisons downstream — anchor them to UTC.
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def stable_id(*parts: Any) -> str:
@@ -162,12 +167,17 @@ class FlashStore:
             if iid in exclude_ids or (iid and iid in seen_ids):
                 continue  # exclude delivered; also guard rare concurrent-append dupes
             ts = parse_iso(it.get("ts") or "")
+            # ts inside the window, OR ingested during this window: late-arriving
+            # items (BHT featured pinning ts to publish-day noon, delayed RSS)
+            # would otherwise fall behind last_digest_ts forever (audit P2-8).
+            fetched = parse_iso(it.get("fetched_at") or "")
+            if not ((ts and window_start <= ts <= window_end) or (fetched and fetched >= window_start)):
+                continue
             if ts is None:
                 continue
-            if window_start <= ts <= window_end:
-                if iid:
-                    seen_ids.add(iid)
-                out.append(it)
+            if iid:
+                seen_ids.add(iid)
+            out.append(it)
         out.sort(key=lambda x: x.get("ts") or "")
         return out
 
