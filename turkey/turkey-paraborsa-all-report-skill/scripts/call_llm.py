@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Generic OpenAI-compatible LLM caller."""
+"""Generic OpenAI-compatible LLM caller.
+
+Uses ``curl`` via subprocess for the actual HTTP call.  Experience showed that
+``requests`` from this sandbox gets intermittent 401 / DNS errors from
+api.minimaxi.com, while ``curl`` succeeds with the same key and payload.  Curl
+also handles the local HTTP proxy more reliably.
+"""
 from __future__ import annotations
 
+import json
 import os
 import re
+import subprocess
+import tempfile
+from pathlib import Path
 from typing import Optional
-
-import requests
 
 
 def _resolve_api_key(api_key_or_env: str) -> str:
@@ -16,15 +24,15 @@ def _resolve_api_key(api_key_or_env: str) -> str:
     match = re.match(r"^\$\{(.+)\}$", api_key_or_env)
     if match:
         env_name = match.group(1)
-        value = os.environ.get(env_name)
+        value = (os.environ.get(env_name) or "").strip()
         if not value:
             raise RuntimeError(f"Environment variable {env_name} is not set.")
         return value
     # Bare env var name (e.g. "MINIMAX_API_KEY") — look up before treating as literal key
     env_value = os.environ.get(api_key_or_env)
     if env_value:
-        return env_value
-    return api_key_or_env
+        return env_value.strip()
+    return api_key_or_env.strip()
 
 
 def _resolve_base_url(base_url_or_env: Optional[str], provider: str) -> str:
@@ -42,6 +50,16 @@ def _resolve_base_url(base_url_or_env: Optional[str], provider: str) -> str:
         "zhipu": "https://open.bigmodel.cn/api/paas/v4",
     }
     return defaults.get(provider, "https://api.openai.com/v1")
+
+
+def _which_curl() -> str:
+    for candidate in ("curl", "C:\\Windows\\System32\\curl.exe"):
+        try:
+            subprocess.run([candidate, "--version"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return candidate
+        except Exception:
+            continue
+    raise RuntimeError("curl executable not found; required for LLM calls.")
 
 
 def call_llm(
@@ -72,14 +90,54 @@ def call_llm(
     if provider == "minimax":
         payload["thinking"] = {"type": "disabled"}
 
-    resp = requests.post(
-        url,
-        json=payload,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        timeout=180,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+    payload_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    curl = _which_curl()
+    with tempfile.NamedTemporaryFile("wb", suffix=".json", delete=False) as f:
+        f.write(payload_bytes)
+        payload_path = f.name
+
+    try:
+        cmd = [
+            curl,
+            "-sS",  # silent but show errors
+            "-L",
+            "-X", "POST",
+            url,
+            "-H", "Content-Type: application/json",
+            "-H", f"Authorization: Bearer {api_key}",
+            "--data-binary", f"@{payload_path}",
+            "-m", "180",
+            "-A", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        ]
+        # Honour explicit proxy settings if present, but do not force one.
+        env = os.environ.copy()
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=200,
+            env=env,
+        )
+    finally:
+        try:
+            os.unlink(payload_path)
+        except OSError:
+            pass
+
+    if result.returncode != 0:
+        raise RuntimeError(f"curl LLM request failed (rc={result.returncode}): {result.stderr.decode('utf-8', errors='ignore')[:500]}")
+
+    raw = result.stdout.decode("utf-8", errors="ignore")
+    if not raw.strip():
+        raise RuntimeError("curl LLM request returned empty body")
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"curl LLM returned non-JSON: {raw[:500]}... ({exc})")
+
+    if data.get("error"):
+        raise RuntimeError(f"LLM API error: {data['error']}")
     if data.get("choices"):
         return data["choices"][0].get("message", {}).get("content", "")
-    raise RuntimeError(f"Unexpected LLM response: {data}")
+    raise RuntimeError(f"Unexpected LLM response: {raw[:500]}")

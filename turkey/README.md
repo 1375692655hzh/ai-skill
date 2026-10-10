@@ -14,3 +14,5 @@
 | `turkey-flash-news-skill` | 市场快讯（KAP/TCMB/BHT/RSS 采集层 + 游标 24h 中文快讯） |
 
 用法见各 skill 内 `QUICKSTART.md` / `SETUP.md`。
+
+统一调度：`../turkey-orchestrator/` —— 7 个土耳其 skill 的编排器（运行→推飞书/企微→run.jsonl 日志），部署说明见其 `ORCHESTRATOR.md`。

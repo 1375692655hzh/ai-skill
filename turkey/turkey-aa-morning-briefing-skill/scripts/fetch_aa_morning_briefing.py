@@ -60,6 +60,53 @@ def slug_for_date(d: date) -> str:
     return f"morning-briefing-{MONTH_NAMES[d.month - 1]}-{d.day}-{d.year}"
 
 
+def slug_variants_for_date(d: date) -> list[str]:
+    """All slug variants AA may use for the day.
+
+    AA's URL pattern is inconsistent:
+    - Most days: `morning-briefing-<month>-<day>-<year>` (full month name)
+    - Aug: `morning-briefing-aug-<day>-<year>` (3-letter month abbreviation)
+    - Sep 1, 2026 onward: `morning-briefing-sept-<day>-<year>-<weekday>`
+      (4-letter abbreviation + weekday suffix)
+
+    Returns a deduplicated list of needles for fuzzy URL matching. The full
+    canonical slug is always first; subsequent variants are tried if the
+    primary fails.
+    """
+    canonical = slug_for_date(d)
+    month_full = MONTH_NAMES[d.month - 1]
+    month_abbr3 = month_full[:3]  # jan, feb, ..., sep, oct, nov, dec
+    weekday = d.strftime("%A").lower()  # monday, tuesday, ...
+
+    variants: list[str] = [canonical]
+    # 3-letter abbreviation (e.g. aug, sep)
+    if month_abbr3 != month_full:
+        variants.append(f"morning-briefing-{month_abbr3}-{d.day}-{d.year}")
+    # 4-letter abbreviation (e.g. sept) — distinct from 3-letter for September
+    month_abbr4 = month_full[:4]
+    if month_abbr4 not in (month_full, month_abbr3):
+        variants.append(f"morning-briefing-{month_abbr4}-{d.day}-{d.year}")
+    # Weekday suffix variants (Sep 1, 2026 introduced `-tuesday`)
+    variants.append(f"morning-briefing-{month_full}-{d.day}-{d.year}-{weekday}")
+    if month_abbr3 != month_full:
+        variants.append(
+            f"morning-briefing-{month_abbr3}-{d.day}-{d.year}-{weekday}"
+        )
+    if month_abbr4 not in (month_full, month_abbr3):
+        variants.append(
+            f"morning-briefing-{month_abbr4}-{d.day}-{d.year}-{weekday}"
+        )
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    out: list[str] = []
+    for v in variants:
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
 def title_for_date(d: date) -> str:
     return f"Morning Briefing: {MONTH_NAMES[d.month - 1].title()} {d.day}, {d.year}"
 
@@ -149,11 +196,19 @@ def _extract_links_from_html(html: str) -> list[str]:
 
 def _pick_working_url(
     urls: list[str],
-    needle: str,
+    needles: str | list[str],
     sess: requests.Session,
 ) -> Optional[str]:
-    """Prefer /world/ URLs that contain needle and return HTTP 200 with title match."""
-    ordered = [u for u in urls if needle in u.lower()]
+    """Prefer /world/ URLs that contain any needle and return HTTP 200 with title match.
+
+    `needles` may be a single string or a list of variants (full slug + 3-letter /
+    4-letter abbreviations + weekday suffix). All variants are accepted as URL
+    matches; the first match wins.
+    """
+    if isinstance(needles, str):
+        needles = [needles]
+    needles_lower = [n.lower() for n in needles]
+    ordered = [u for u in urls if any(n in u.lower() for n in needles_lower)]
     # Prefer world over general
     ordered.sort(key=lambda u: (0 if "/en/world/" in u else 1, u))
     for url in ordered:
@@ -161,10 +216,14 @@ def _pick_working_url(
             resp = sess.get(url, timeout=25, allow_redirects=True)
             if resp.status_code != 200:
                 continue
-            # Reject soft-404 / wrong article: title or slug must match
-            if needle not in resp.url.lower() and needle not in resp.text.lower()[:8000]:
+            # Reject soft-404 / wrong article: title or slug must match any needle
+            url_lower = resp.url.lower()
+            body_head = resp.text.lower()[:8000]
+            if not any(n in url_lower or n in body_head for n in needles_lower):
                 continue
-            if "Morning Briefing" not in resp.text and needle not in resp.url.lower():
+            if "Morning Briefing" not in resp.text and not any(
+                n in url_lower for n in needles_lower
+            ):
                 continue
             return resp.url.split("#")[0].split("?")[0]
         except Exception:
@@ -184,27 +243,46 @@ def discover_briefing_url(
         return {"ok": True, "url": force_url, "discover_source": "force_url"}
 
     sess = session or _session()
-    needle = slug_for_date(target_date)
+    needles = slug_variants_for_date(target_date)
+    needle = needles[0]  # primary for logging
     title = title_for_date(target_date)
     candidates: list[tuple[str, str]] = []
 
+    def _matches_any_needle(url: str) -> bool:
+        u = url.lower()
+        return any(n in u for n in needles)
+
     def _add_from_html(html: str, source: str) -> None:
         for url in _extract_links_from_html(html):
-            if needle in url.lower():
+            if _matches_any_needle(url):
                 candidates.append((url, source))
 
     # 1) Date-specific search (most reliable for older / general/ routes)
     try:
-        q_urls = [
-            f"https://www.aa.com.tr/en/search?s={needle}",
-            f"https://www.aa.com.tr/en/search?s={title.replace(' ', '+')}",
-            SEARCH_URL,
+        # Build search queries: full title + abbreviated title (Sept. vs September)
+        # AA's display title uses 4-letter abbreviations for some months.
+        month_full_title = MONTH_NAMES[target_date.month - 1].title()
+        month_abbr3_title = month_full_title[:3] + "."  # Sep., Aug.
+        month_abbr4_title = (
+            month_full_title[:4] + "." if month_full_title[:4] not in
+            (month_full_title, month_full_title[:3]) else None
+        )
+        title_variants = [
+            title,
+            title.replace(month_full_title, month_abbr3_title),
         ]
+        if month_abbr4_title and month_abbr4_title.replace(".", "") != month_abbr3_title.replace(".", ""):
+            title_variants.append(title.replace(month_full_title, month_abbr4_title))
+        q_urls = (
+            [f"https://www.aa.com.tr/en/search?s={needle}"]
+            + [f"https://www.aa.com.tr/en/search?s={t.replace(' ', '+')}" for t in title_variants]
+            + [SEARCH_URL]
+        )
         for qurl in q_urls:
             resp = sess.get(qurl, timeout=30)
             resp.raise_for_status()
             _add_from_html(resp.text, "search")
-            if any(needle in u.lower() for u, _ in candidates):
+            if any(_matches_any_needle(u) for u, _ in candidates):
                 break
     except Exception as exc:
         print(f"Warning: search discovery failed: {exc}", file=sys.stderr)
@@ -217,7 +295,8 @@ def discover_briefing_url(
         for entry in feed.entries:
             link = getattr(entry, "link", "") or ""
             entry_title = getattr(entry, "title", "") or ""
-            if needle in link.lower() or title.lower() in entry_title.lower():
+            link_lower = link.lower()
+            if any(n in link_lower for n in needles) or title.lower() in entry_title.lower():
                 candidates.append((link, "world_rss"))
         _add_from_html(resp.text, "world_rss_raw")
     except Exception as exc:
@@ -242,7 +321,7 @@ def discover_briefing_url(
 
     # Keep source of first match for logging; probe for a working URL
     source = candidates[0][1]
-    url = _pick_working_url([u for u, _ in candidates], needle, sess)
+    url = _pick_working_url([u for u, _ in candidates], needles, sess)
     if not url:
         return {
             "ok": False,
@@ -345,9 +424,19 @@ def _parse_meta_times(html: str, soup: BeautifulSoup) -> dict:
 
 
 def _extract_body_html_from_scripts(html: str) -> str:
-    """AA Next.js pages embed article HTML in script payloads with \\u003c escapes."""
+    """AA Next.js pages embed article HTML in script payloads with \\u003c escapes.
+
+    Since 2026-08, AA also renders the body directly into HTML inside a
+    <div class="embed-responsive prose ..."> container. We try the script
+    pattern first (it has the longest, cleanest content), then fall back to
+    the prose div if no script payload yielded anything. Both paths return
+    HTML suitable for ``_html_to_text``.
+    """
     soup = BeautifulSoup(html, "html.parser")
     best = ""
+
+    # 1) Original: extract from Next.js script payload (preferred when AA still
+    #    embeds the body in RSC payloads — gives the cleanest structure).
     for script in soup.find_all("script"):
         raw = script.string or script.get_text() or ""
         if "TOP STORIES" not in raw and "NEWS IN BRIEF" not in raw:
@@ -370,6 +459,20 @@ def _extract_body_html_from_scripts(html: str) -> str:
                     chunk = chunk[:cut]
             if len(chunk) > len(best):
                 best = chunk
+    if best:
+        return best
+
+    # 2) Fallback: body is rendered directly to the DOM inside
+    #    <div class="embed-responsive prose ...">. AA changed its renderer in
+    #    late Aug 2026; the prose div is the only reliable source after that
+    #    switch. Long-term guard against further regression — see MEMORY.md
+    #    "08-30: AA 改版，正文不再嵌入 RSC script payload".
+    prose_div = soup.find(
+        "div",
+        class_=re.compile(r"embed-responsive\s+prose", re.I),
+    )
+    if prose_div:
+        return str(prose_div)
     return best
 
 

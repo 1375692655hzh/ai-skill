@@ -1,0 +1,11 @@
+automation_config.json
+config.json
+output/
+logs/
+.cache/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+Thumbs.db
+.env

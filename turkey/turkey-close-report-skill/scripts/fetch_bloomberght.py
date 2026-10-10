@@ -83,11 +83,12 @@ def fetch_close_review(
     workdir: Path | None = None,
     use_project_fetcher: bool = True,
     list_page_url: str = f"{BASE}/tum-piyasa-haberleri",
+    force_refresh: bool = False,
 ) -> dict:
     cache_dir = Path(cache_dir)
     cache_file = cache_dir / f"bloomberght_close_{target_date.isoformat()}.json"
 
-    if cache_file.exists():
+    if not force_refresh and cache_file.exists():
         try:
             cached = json.loads(cache_file.read_text(encoding="utf-8"))
             closing = cached.get("closing_review") or {}
@@ -95,6 +96,17 @@ def fetch_close_review(
                 return cached
         except Exception:
             pass
+
+    # When force_refresh is requested, also purge the inner fetcher's cache so
+    # the second verification pass cannot silently reuse a stale "not found".
+    if force_refresh:
+        inner_cache = cache_dir / f"bloomberght_closing_{target_date.isoformat()}.json"
+        for stale in (cache_file, inner_cache):
+            try:
+                if stale.exists():
+                    stale.unlink()
+            except OSError:
+                pass
 
     closing = _fetch_closing_review(
         target_date=target_date,

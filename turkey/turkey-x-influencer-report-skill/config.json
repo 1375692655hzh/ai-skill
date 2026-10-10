@@ -10,7 +10,7 @@
     "window": "yesterday_start_to_now",
     "fxtwitter_base_url": "https://api.fxtwitter.com",
     "fxtwitter_count": 100,
-    "fxtwitter_with_replies": true,
+    "fxtwitter_with_replies": false,
     "fxtwitter_groupthreads": true,
     "timezone": "Europe/Istanbul",
     "xai_model": "x-ai/grok-build-0.1",

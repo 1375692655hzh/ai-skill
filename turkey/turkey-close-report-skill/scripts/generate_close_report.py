@@ -8,7 +8,7 @@ import json
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -30,6 +30,14 @@ from bht_fact_sheet import format_bloomberght_for_prompt, build_bht_fact_sheet
 
 
 WEEKDAYS_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+# BHT fallback/verification state files live in cache_dir.
+VERIFY_PENDING_NAME = "{date}_bht_verify_pending.json"
+VERIFY_PENDING_MAX_AGE_HOURS = 6  # ignore stale markers
+
+
+def _verify_pending_path(cache_dir: Path, target_date: date) -> Path:
+    return cache_dir / VERIFY_PENDING_NAME.format(date=target_date.isoformat())
 
 
 def _safe_unlink(path: Path) -> None:
@@ -90,7 +98,52 @@ def format_info_yatirim(data: dict) -> str:
     return "\n".join(lines) if lines else "暂无技术/公告数据。"
 
 
-def generate(config_path: Path, force_date: str | None = None, no_llm: bool = False) -> Path | None:
+def _load_verify_pending(cache_dir: Path, target_date: date) -> dict | None:
+    path = _verify_pending_path(cache_dir, target_date)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        created = data.get("created_at")
+        if created:
+            try:
+                dt = datetime.fromisoformat(created)
+                if datetime.now(timezone.utc) - dt > timedelta(
+                    hours=VERIFY_PENDING_MAX_AGE_HOURS
+                ):
+                    _safe_unlink(path)
+                    return None
+            except ValueError:
+                _safe_unlink(path)
+                return None
+        return data
+    except Exception:
+        return None
+
+
+def _write_verify_pending(cache_dir: Path, target_date: date, payload: dict) -> None:
+    path = _verify_pending_path(cache_dir, target_date)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {"created_at": datetime.now(timezone.utc).isoformat(), **payload},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _remove_verify_pending(cache_dir: Path, target_date: date) -> None:
+    _safe_unlink(_verify_pending_path(cache_dir, target_date))
+
+
+def generate(
+    config_path: Path,
+    force_date: str | None = None,
+    no_llm: bool = False,
+    verify_bht: bool = False,
+) -> Path | None:
     configure_stdio()
     config = load_config(config_path)
     skill_dir, workdir, output_dir, cache_dir, template_path = resolve_paths(
@@ -121,11 +174,26 @@ def generate(config_path: Path, force_date: str | None = None, no_llm: bool = Fa
     print(f"Today (TR): {today}")
     print(f"Target date: {target_date}")
 
+    pending = _load_verify_pending(cache_dir, target_date)
+
+    # --verify-bht mode: only act if a previous run left a pending marker and
+    # actually produced a fallback report. Otherwise there is nothing to fix.
+    if verify_bht:
+        if not pending:
+            print(f"No BHT verification pending for {target_date}; nothing to do.")
+            return None
+        if not pending.get("fallback_generated"):
+            print(f"No fallback report was generated for {target_date}; nothing to verify.")
+            _remove_verify_pending(cache_dir, target_date)
+            return None
+        print(f"Verification pass: force-refreshing BHT cache for {target_date}")
+
     bloomberght = fetch_close_review(
         target_date,
         cache_dir,
         workdir=workdir,
         use_project_fetcher=use_project_fetcher,
+        force_refresh=(verify_bht or (pending is not None and not pending.get("fallback_generated"))),
     )
     closing_text = bloomberght.get("closing_review", {}).get("text", "")
     if closing_text and not is_content_for_date(target_date, closing_text, "bloomberght"):
@@ -142,9 +210,23 @@ def generate(config_path: Path, force_date: str | None = None, no_llm: bool = Fa
             cache_dir,
             workdir=workdir,
             use_project_fetcher=use_project_fetcher,
+            force_refresh=verify_bht,
         )
-    if not bloomberght.get("ok"):
-        print(f"Warning: closing review not found for {target_date}")
+    bht_missing = not bloomberght.get("ok")
+
+    # If this is the verification pass and BHT is still missing, leave the
+    # pending marker in place and exit without changing files. The runner will
+    # retry again later (up to its max_retries).
+    if verify_bht and bht_missing:
+        print(f"Verification pass: BHT still not found for {target_date}; keeping pending marker")
+        return None
+
+    # If BHT is missing on the first pass, we still generate a fallback report
+    # using live quotes + Paraborsa/Info when available. The runner will then
+    # schedule a verification pass.
+    is_fallback = bht_missing and not verify_bht
+    if is_fallback:
+        print(f"Fallback mode: generating close report without BHT article for {target_date}")
 
     # Live XU100 from /piyasalar overrides the close-review article's BIST 100
     # close/pct (article has been observed stale/mistyped; market page is
@@ -158,7 +240,9 @@ def generate(config_path: Path, force_date: str | None = None, no_llm: bool = Fa
     # historical date is forced, keep the article's BIST/stock facts instead
     # of accidentally injecting the current market page.
     live_quotes_for_target = live_quotes
-    if target_date != today:
+    # In fallback mode we still want today's live quote facts (we are after
+    # market close, so /borsa already reflects the target trading day).
+    if target_date != today and not is_fallback:
         live_quotes_for_target = dict(live_quotes)
         live_quotes_for_target["quotes"] = dict(live_quotes.get("quotes") or {})
         live_quotes_for_target["quotes"].pop("XU100", None)
@@ -215,19 +299,38 @@ def generate(config_path: Path, force_date: str | None = None, no_llm: bool = Fa
         if live_quotes_for_target.get("xu100_status") == "after_close":
             xu = live_quotes_for_target["quotes"]["XU100"]
             index_override = {"last": xu.get("last"), "pct": xu.get("pct")}
-    source_facts = (
-        build_bht_fact_sheet(
-            bloomberght.get("closing_review", {}).get("text", ""),
-            index_override=index_override,
-            live_borsa=(
-                live_quotes_for_target.get("borsa") or {}
-                if live_quotes_for_target.get("xu100_status") == "after_close"
-                else {}
-            ),
+    # The provenance fingerprint must cover EVERY number the prompt legitimately
+    # offers for the four fact sections — not just the parsed fact sheet.
+    # 2026-09-04: THYAO turnover appeared as 204.99亿里拉 in the normalized
+    # article text (20.499.267.628 TL) but 205亿里拉 in the live /borsa snapshot
+    # (20.499.704.878 TL → :.2f rounds up). The LLM quoted the article figure,
+    # the fingerprint only knew the snapshot figure → false-positive
+    # "numbers not found in BHT source". So fingerprint = sheet + normalized
+    # article text + live borsa card (all three feed the fact sections).
+    from bht_fact_sheet import normalize_bht_text
+    # In fallback mode the BHT article is absent; use live quote cards as the
+    # provenance fingerprint so numbers still get validated.
+    source_facts_parts: list[str] = []
+    if bloomberght.get("ok"):
+        source_facts_parts.append(
+            build_bht_fact_sheet(
+                bloomberght.get("closing_review", {}).get("text", ""),
+                index_override=index_override,
+                live_borsa=(
+                    live_quotes_for_target.get("borsa") or {}
+                    if live_quotes_for_target.get("xu100_status") == "after_close"
+                    else {}
+                ),
+            )
         )
-        if bloomberght.get("ok")
-        else None
-    )
+        cr_text = bloomberght.get("closing_review", {}).get("text", "")
+        if cr_text:
+            source_facts_parts.append(normalize_bht_text(cr_text))
+    if live_quotes_for_target.get("xu100_status") == "after_close":
+        source_facts_parts.append(live_quotes_for_target.get("borsa_fact_cn") or "")
+    if not bloomberght.get("ok"):
+        source_facts_parts.append(live_quotes_for_target.get("fact_cn") or "")
+    source_facts = "\n".join(p for p in source_facts_parts if p) or None
     validate_with_source = (
         (lambda text: validate(text, source_facts=source_facts))
         if source_facts
@@ -308,9 +411,34 @@ def generate(config_path: Path, force_date: str | None = None, no_llm: bool = Fa
             "status": "ok",
         })
     title = f"土耳其股市收评 — {target_date.isoformat()}（{weekday_cn}）"
+    if is_fallback:
+        title = f"土耳其股市收评（临时版） — {target_date.isoformat()}（{weekday_cn}）"
     content = prepend_header(content, sources, title=title)
 
-    output_file = output_dir / f"{target_date.isoformat()}_close_report_zh.md"
+    # Fallback reports use a distinct file suffix so the runner can distinguish
+    # them and schedule a verification pass; final reports overwrite the normal
+    # filename.
+    if is_fallback:
+        output_file = output_dir / f"{target_date.isoformat()}_close_report_fallback_zh.md"
+        _write_verify_pending(
+            cache_dir,
+            target_date,
+            {
+                "fallback_generated": True,
+                "fallback_file": str(output_file),
+                "bht_error": bloomberght.get("error", ""),
+            },
+        )
+    else:
+        output_file = output_dir / f"{target_date.isoformat()}_close_report_zh.md"
+        _remove_verify_pending(cache_dir, target_date)
+        # Clean up a previously published fallback file so downstream tooling
+        # only sees the authoritative final report.
+        fb_file = output_dir / f"{target_date.isoformat()}_close_report_fallback_zh.md"
+        _safe_unlink(fb_file)
+        fb_brief = output_dir / f"{target_date.isoformat()}_close_report_fallback_brief_zh.md"
+        _safe_unlink(fb_brief)
+
     output_file.write_text(content, encoding="utf-8")
     print(f"Close report written to: {output_file}")
 
@@ -343,9 +471,17 @@ def generate(config_path: Path, force_date: str | None = None, no_llm: bool = Fa
                 "禁止列表符号、Markdown、表格、Emoji；"
                 "篇幅 200–600 个汉字+中文标点（英文代码、数字不计入）；"
                 "只要换行、不要空行。"
+                f"{'当前为临时版（BHT收盘综述未发布），简报正文须明确标注“临时版”或“待BHT收盘综述发布后更新”。' if is_fallback else ''}"
             ),
         )
-        brief_file = output_dir / f"{target_date.isoformat()}_close_report_brief_zh.md"
+        if is_fallback:
+            brief_file = output_dir / f"{target_date.isoformat()}_close_report_fallback_brief_zh.md"
+        else:
+            brief_file = output_dir / f"{target_date.isoformat()}_close_report_brief_zh.md"
+            # Remove stale fallback brief if final succeeded.
+            _safe_unlink(
+                output_dir / f"{target_date.isoformat()}_close_report_fallback_brief_zh.md"
+            )
         if brief_output and brief_result.get("ok"):
             brief_file.write_text(brief_output, encoding="utf-8")
             print(f"Brief close report written to: {brief_file}")
@@ -366,10 +502,20 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=Path, required=True, help="Path to config.json")
     parser.add_argument("--force-date", type=str, default=None, help="Force target date (YYYY-MM-DD)")
     parser.add_argument("--no-llm", action="store_true", help="Only build prompt, do not call LLM")
+    parser.add_argument(
+        "--verify-bht",
+        action="store_true",
+        help="Second-pass verification: force-refresh BHT and regenerate if found",
+    )
     args = parser.parse_args()
 
     try:
-        generate(args.config, force_date=args.force_date, no_llm=args.no_llm)
+        generate(
+            args.config,
+            force_date=args.force_date,
+            no_llm=args.no_llm,
+            verify_bht=args.verify_bht,
+        )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)

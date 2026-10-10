@@ -240,7 +240,14 @@ def run(config_path: Path, force_date: str | None = None) -> int:
     )
     digest_path = out_dir / "daily_digest.md"
     digest_path.write_text(digest, encoding="utf-8")
+    # 生成 brief 版供 runner 以文本形式发送到飞书群
+    brief_text = digest[:3000].strip()
+    if len(digest) > 3000:
+        brief_text += "\n\n...（内容较长，完整版见文件）"
+    brief_path = out_dir / "daily_digest_brief.md"
+    brief_path.write_text(brief_text, encoding="utf-8")
     print(f"✅ digest -> {digest_path}")
+    print(f"✅ brief  -> {brief_path}")
     print(f"   new_filings={len(new_filings)} new_hearings={len(new_hearings)} "
           f"new_offers={len(new_offers)} new_listings={len(new_listings)}")
     return 0

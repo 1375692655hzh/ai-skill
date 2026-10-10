@@ -17,6 +17,9 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
 }
+# Paraborsa serves real content directly; the local HTTP proxy (if any) trips
+# Cloudflare's managed challenge and returns an interstitial page. Bypass it.
+NO_PROXY = {"http": None, "https": None}
 
 # Known broker slugs for REST slug probing (supplements WP search).
 BROKER_SLUGS = [
@@ -33,14 +36,26 @@ BROKER_SLUGS = [
 DEFAULT_PREFIXES = ["borsa-yorumu", "gun-ici-borsa-yorumu", "viop-yorumu", "haftalik-borsa-yorumu"]
 
 
-def date_token(d: date) -> str:
-    # Paraborsa slugs use zero-padded day AND month (e.g. "07-07-2026"). Both
-    # must be padded or slug_probe misses every broker on single-digit days.
-    return f"{d.day:02d}-{d.month:02d}-{d.year}"
+def date_token(d: date, *, pad_day: bool = False) -> str:
+    # Paraborsa currently uses UNPADDED day in slugs (e.g. "3-09-2026"),
+    # but earlier titles sometimes had padded day. Expose both variants.
+    day_fmt = f"{d.day:02d}" if pad_day else f"{d.day}"
+    return f"{day_fmt}-{d.month:02d}-{d.year}"
 
 
-def dot_date(d: date) -> str:
-    return f"{d.day:02d}.{d.month:02d}.{d.year}"
+def date_token_variants(d: date) -> list[str]:
+    variants = {date_token(d, pad_day=False), date_token(d, pad_day=True)}
+    return list(variants)
+
+
+def dot_date(d: date, *, pad_day: bool = False) -> str:
+    day_fmt = f"{d.day:02d}" if pad_day else f"{d.day}"
+    return f"{day_fmt}.{d.month:02d}.{d.year}"
+
+
+def dot_date_variants(d: date) -> list[str]:
+    variants = {dot_date(d, pad_day=False), dot_date(d, pad_day=True)}
+    return list(variants)
 
 
 def strip_html(text: str) -> str:
@@ -48,16 +63,18 @@ def strip_html(text: str) -> str:
 
 
 def matches_target(title: str, slug: str, target: date, *, include_period: bool = True) -> bool:
-    dot = dot_date(target)
-    token = date_token(target)
+    dots = dot_date_variants(target)
+    tokens = date_token_variants(target)
     text = f"{title} {slug}"
-    if dot in text or token in slug:
+    if any(dot in text for dot in dots) or any(token in slug for token in tokens):
         return True
-    if include_period and re.search(
-        rf"{re.escape(dot)}\s*[-–/]\s*\d{{1,2}}\.{target.month:02d}\.{target.year}",
-        title,
-    ):
-        return True
+    if include_period:
+        for dot in dots:
+            if re.search(
+                rf"{re.escape(dot)}\s*[-–/]\s*\d{{1,2}}\.{target.month:02d}\.{target.year}",
+                title,
+            ):
+                return True
     return False
 
 
@@ -82,23 +99,29 @@ def broker_from_slug(slug: str) -> str:
 
 
 def parse_broker_slug(slug: str, target: date) -> str:
-    token = date_token(target)
-    for prefix in DEFAULT_PREFIXES:
-        needle = f"{prefix}-"
-        if slug.startswith(needle) and slug.endswith(f"-{token}"):
-            return slug[len(needle): -len(token) - 1]
+    for token in date_token_variants(target):
+        for prefix in DEFAULT_PREFIXES:
+            needle = f"{prefix}-"
+            if slug.startswith(needle) and slug.endswith(f"-{token}"):
+                return slug[len(needle): -len(token) - 1]
     return slug
 
 
 def wp_search(target: date, *, delay: float = 0.8) -> dict[str, dict]:
     found: dict[str, dict] = {}
-    queries = [dot_date(target), date_token(target), "borsa yorumu", f"borsa-yorumu {dot_date(target)}"]
+    queries = set()
+    queries.update(dot_date_variants(target))
+    queries.update(date_token_variants(target))
+    queries.add("borsa yorumu")
+    for dot in dot_date_variants(target):
+        queries.add(f"borsa-yorumu {dot}")
     for q in queries:
         try:
             resp = requests.get(
                 f"{BASE}/wp-json/wp/v2/posts",
                 params={"search": q, "per_page": 100},
                 headers=HEADERS,
+                proxies=NO_PROXY,
                 timeout=30,
             )
             if resp.status_code != 200:
@@ -139,44 +162,46 @@ def slug_probe(
     delay: float = 0.35,
 ) -> dict[str, dict]:
     found: dict[str, dict] = {}
-    token = date_token(target)
+    tokens = date_token_variants(target)
     for prefix in prefixes:
         for broker in brokers:
-            slug = f"{prefix}-{broker}-{token}"
-            try:
-                resp = requests.get(
-                    f"{BASE}/wp-json/wp/v2/posts",
-                    params={"slug": slug},
-                    headers=HEADERS,
-                    timeout=20,
-                )
-                if resp.status_code != 200:
-                    continue
+            for token in tokens:
+                slug = f"{prefix}-{broker}-{token}"
                 try:
-                    posts_data = resp.json()
-                except (ValueError, json.JSONDecodeError) as exc:
-                    preview = re.sub(r"\s+", " ", resp.text or "")[:200]
-                    print(
-                        f"Warning: slug_probe bad JSON for {slug}: {exc}; "
-                        f"body[:200]={preview!r}",
-                        file=sys.stderr,
+                    resp = requests.get(
+                        f"{BASE}/wp-json/wp/v2/posts",
+                        params={"slug": slug},
+                        headers=HEADERS,
+                        proxies=NO_PROXY,
+                        timeout=20,
                     )
+                    if resp.status_code != 200:
+                        continue
+                    try:
+                        posts_data = resp.json()
+                    except (ValueError, json.JSONDecodeError) as exc:
+                        preview = re.sub(r"\s+", " ", resp.text or "")[:200]
+                        print(
+                            f"Warning: slug_probe bad JSON for {slug}: {exc}; "
+                            f"body[:200]={preview!r}",
+                            file=sys.stderr,
+                        )
+                        continue
+                    if not posts_data:
+                        continue
+                    post = posts_data[0]
+                    title = strip_html(post.get("title", {}).get("rendered", ""))
+                    found[slug] = {
+                        "slug": slug,
+                        "title": title,
+                        "url": post.get("link", ""),
+                        "article_type": prefix,
+                        "broker_slug": broker,
+                        "discovered_via": "slug_probe",
+                    }
+                    time.sleep(delay)
+                except requests.RequestException:
                     continue
-                if not posts_data:
-                    continue
-                post = posts_data[0]
-                title = strip_html(post.get("title", {}).get("rendered", ""))
-                found[slug] = {
-                    "slug": slug,
-                    "title": title,
-                    "url": post.get("link", ""),
-                    "article_type": prefix,
-                    "broker_slug": broker,
-                    "discovered_via": "slug_probe",
-                }
-                time.sleep(delay)
-            except requests.RequestException:
-                continue
     return found
 
 
@@ -187,13 +212,27 @@ def scan_all(
     include_period_ranges: bool = True,
     search_delay: float = 0.8,
     probe_delay: float = 0.35,
+    slug_probe_min_commentary: int = 10,
 ) -> list[dict]:
     prefixes = list(allowed_prefixes or DEFAULT_PREFIXES)
-    merged = {**wp_search(target, delay=search_delay), **slug_probe(target, prefixes=prefixes, delay=probe_delay)}
+
+    # wp_search usually covers the day's commentaries; only burn time on
+    # slug_probe if the broad search came up short.
+    merged = wp_search(target, delay=search_delay)
     articles = [
         it for it in merged.values()
         if is_commentary(it["title"], it["slug"], prefixes)
         and matches_target(it["title"], it["slug"], target, include_period=include_period_ranges)
     ]
+
+    if len(articles) < slug_probe_min_commentary:
+        probed = slug_probe(target, prefixes=prefixes, delay=probe_delay)
+        merged = {**merged, **probed}
+        articles = [
+            it for it in merged.values()
+            if is_commentary(it["title"], it["slug"], prefixes)
+            and matches_target(it["title"], it["slug"], target, include_period=include_period_ranges)
+        ]
+
     articles.sort(key=lambda x: (x["article_type"], x["broker_slug"], x["slug"]))
     return articles

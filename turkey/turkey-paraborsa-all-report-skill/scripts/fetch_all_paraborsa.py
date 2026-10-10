@@ -26,6 +26,8 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
 }
+# Bypass local proxy: it triggers Cloudflare's managed challenge for paraborsa.net.
+NO_PROXY = {"http": None, "https": None}
 
 # Status codes that typically indicate transient Cloudflare / origin flaps and
 # should be retried rather than treated as permanent per-slug failures.
@@ -55,7 +57,7 @@ def fetch_post_by_slug(
     url = f"{BASE}/wp-json/wp/v2/posts?slug={slug}"
     for attempt in range(retries):
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=25)
+            resp = requests.get(url, headers=HEADERS, proxies=NO_PROXY, timeout=25)
         except requests.RequestException as exc:
             if attempt + 1 >= retries:
                 return None, f"network_error:{exc}"

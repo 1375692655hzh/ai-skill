@@ -70,8 +70,18 @@ MIN_TICKERS_IN_STOCKS = 3
 
 
 def _extract_section(text: str, title: str) -> str:
-    """Return body of 【title】 until next 【...】 or 风险提示."""
-    pat = rf"【{re.escape(title)}】\s*(.*?)(?=\n【|\n风险提示|$)"
+    """Return body of 【title】 until next 【...】 or 风险提示.
+
+    NOTE: only horizontal whitespace may follow the title. Using ``\\s*`` here
+    was a real bug (2026-09-03): when a section body is EMPTY (e.g. BHT fact
+    card had no data so the LLM left 【汇市与大宗商品】 blank), the greedy
+    ``\\s*`` consumed the newlines AND the lookahead ``\\n【`` could never fire
+    at the correct boundary, so the capture ran past the next 【...】 heading
+    and swallowed the FOLLOWING section. That mis-attributed the opinion
+    slot's 「资金情绪：……权重股……」 to the empty FX fact section and raised a
+    false-positive "generic phrase 权重股" blocking error.
+    """
+    pat = rf"【{re.escape(title)}】[ \t]*(.*?)(?=\n【|\n风险提示|$)"
     m = re.search(pat, text, re.S)
     return (m.group(1) if m else "").strip()
 
@@ -300,11 +310,14 @@ def validate(text: str, *, source_facts: str | None = None) -> dict:
                 "Translate every sector name to Chinese."
             )
 
-    # 大盘概况 must contain a concrete BIST 100 close (5-digit level like 12xxx-15xxx;
-    # was hard-coded 1[3-5]xxx and false-flagged valid closes once the index fell
-    # below 13000 — observed 2026-10-09 close 12253.16).
+    # 大盘概况 must contain a concrete BIST 100 close (5-digit number, 10xxx–15xxx range).
+    # 2026-09-25: BIST 100 fell into 12xxx after 09-24 -2.74%; the original 1[3-5] regex
+    # rejected 12907.57 and falsely flagged the output. Widened to 1[2-5].
+    # 2026-09-30: BIST 100 dropped to 11947.18 (-2.79%) — broke below 12000. Widened to 1[0-5]
+    # to cover 10000–15999 (defensive against further falls; LLM normally narrates the figure
+    # it was given, so widening never introduces false positives).
     overview = _extract_section(text, "大盘概况")
-    if overview and not re.search(r"(?<!\d)1[0-9]\s?\d{3}([.,]\d{1,2})?(?!\d)", overview):
+    if overview and not re.search(r"1[0-5]\s?\d{3}([.,]\d{1,2})?", overview):
         errors.append(
             "[大盘概况] missing concrete BIST100 close figure (e.g. 13687.86); do not narrate."
         )

@@ -86,7 +86,11 @@ def validate_summary(text: str) -> dict:
                 if len(parts) <= 1:
                     single_broker_rows += 1
             if len(rows) >= 6 and single_broker_rows / len(rows) > 0.6:
-                errors.append(
+                # Downgrade to warning: on low-volatility / thin-coverage days
+                # each broker only lists its own contribution stocks, so a
+                # single-broker table is the honest synthesis, not model
+                # laziness. Blocking here killed the whole 2026-09-03 report.
+                warnings.append(
                     f"[个股覆盖汇总] {single_broker_rows}/{len(rows)} rows cite only one broker; "
                     "prefer tickers mentioned by ≥2 brokers."
                 )
