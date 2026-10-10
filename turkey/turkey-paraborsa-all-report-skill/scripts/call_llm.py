@@ -97,6 +97,13 @@ def call_llm(
         f.write(payload_bytes)
         payload_path = f.name
 
+    # Retry with exponential backoff: the curl swap (2026-10-10) restored
+    # sandbox reliability but silently dropped the 3-attempt retry the
+    # requests version had — one transient 5xx/timeout killed the report.
+    import time as _time
+
+    result = None
+    last_err = ""
     try:
         cmd = [
             curl,
@@ -112,20 +119,31 @@ def call_llm(
         ]
         # Honour explicit proxy settings if present, but do not force one.
         env = os.environ.copy()
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=200,
-            env=env,
-        )
+        for attempt in range(3):
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=200,
+                    env=env,
+                )
+                if result.returncode == 0:
+                    break
+                last_err = result.stderr.decode("utf-8", errors="ignore")[:300]
+            except subprocess.TimeoutExpired as exc:
+                last_err = f"timeout after {exc.timeout}s"
+                result = None
+            if attempt < 2:
+                _time.sleep(2 ** attempt * 2)
     finally:
         try:
             os.unlink(payload_path)
         except OSError:
             pass
 
-    if result.returncode != 0:
-        raise RuntimeError(f"curl LLM request failed (rc={result.returncode}): {result.stderr.decode('utf-8', errors='ignore')[:500]}")
+    if result is None or result.returncode != 0:
+        detail = last_err or (result.stderr.decode("utf-8", errors="ignore")[:500] if result else "no response")
+        raise RuntimeError(f"curl LLM request failed after retries: {detail}")
 
     raw = result.stdout.decode("utf-8", errors="ignore")
     if not raw.strip():

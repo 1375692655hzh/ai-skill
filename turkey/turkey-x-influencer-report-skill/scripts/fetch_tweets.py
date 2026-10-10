@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Fetch recent posts from X watchlist via xAI Responses API + x_search."""
+"""Fetch recent posts from X watchlist — FxTwitter v2 primary, xAI x_search fallback."""
 from __future__ import annotations
 
 import json
@@ -831,7 +831,14 @@ def fetch_account_posts_fxtwitter(
             # (failure AND no posts) as a full account failure.
             if all_posts:
                 _progress(f"  {account.clean_handle}: page failed after {len(all_posts)} posts, keeping partial")
-                return all_posts, None, True
+                # Carry the failure so the caller records it: a None failure here
+                # would let the (posts-bearing, failure-free) result be cached,
+                # permanently fixing the truncated feed for the day (audit A3.3).
+                return all_posts, {
+                    "handle": account.clean_handle,
+                    "provider": "fxtwitter",
+                    "error": (last_error or "fxtwitter page failed") + " (partial)",
+                }, True
             return [], {
                 "handle": account.clean_handle,
                 "provider": "fxtwitter",
@@ -921,8 +928,11 @@ def fetch_watchlist_fxtwitter(
             with_replies=with_replies,
             groupthreads=groupthreads,
         )
-        if failure and not account_posts:
+        if failure:
+            # Partial successes must be recorded here too (audit A3.3) — the
+            # merged cache guards key off `failures`.
             failures.append(failure)
+        if failure and not account_posts:
             _progress(f"  {account.clean_handle}: failed — {failure.get('error', '')[:160]}")
         else:
             posts.extend(account_posts)
@@ -1010,7 +1020,11 @@ def fetch_account_posts_xai(
             # Page 2+ failure: keep earlier pages' posts (partial success).
             if all_posts:
                 _progress(f"  {account.clean_handle}: page failed after {len(all_posts)} posts, keeping partial")
-                return all_posts, None, True
+                return all_posts, {
+                    "handle": account.clean_handle,
+                    "provider": "xai",
+                    "error": (last_error or "xai page failed") + " (partial)",
+                }, True
             return [], {
                 "handle": account.clean_handle,
                 "provider": "xai",
@@ -1103,8 +1117,12 @@ def fetch_watchlist(
             retry_delay=retry_delay_seconds,
             api_mode=api_mode,
         )
-        if failure and not account_posts:
+        if failure:
+            # Record partial successes too: the cache guards key off `failures`
+            # being empty, so a silently dropped partial failure would cement
+            # a truncated feed for the whole day (audit A3.3).
             failures.append(failure)
+        if failure and not account_posts:
             consecutive += 1
             _progress(f"  {account.clean_handle}: failed — {failure.get('error', '')[:160]}")
             if max_consecutive_failures > 0 and consecutive >= max_consecutive_failures:

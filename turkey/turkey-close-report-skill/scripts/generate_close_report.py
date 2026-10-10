@@ -33,7 +33,7 @@ WEEKDAYS_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周�
 
 # BHT fallback/verification state files live in cache_dir.
 VERIFY_PENDING_NAME = "{date}_bht_verify_pending.json"
-VERIFY_PENDING_MAX_AGE_HOURS = 6  # ignore stale markers
+VERIFY_PENDING_MAX_AGE_HOURS = 10  # must outlast the 00:10 TR recheck gap (audit B1)
 
 
 def _verify_pending_path(cache_dir: Path, target_date: date) -> Path:

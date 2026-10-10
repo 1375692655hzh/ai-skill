@@ -62,8 +62,8 @@ def classify_kap(item: dict[str, Any], *, noise: list[str], p0: list[str]) -> st
     # Noise is judged on the subject/title only: procedural categories are
     # named there. A substantive disclosure whose BODY mentions e.g. BISTECH
     # must still reach the prompt (2026-10-10 audit P2-11).
-    title = item.get("title", "")
-    text = f"{title} {item.get('body', '')}"
+    title = str(item.get("title") or "")
+    text = f"{title} {item.get('body') or ''}"
     if any(re.search(p, title, re.IGNORECASE) for p in noise):
         return "P3"
     if any(re.search(p, text, re.IGNORECASE) for p in p0):

@@ -12,6 +12,48 @@ from typing import Optional
 import requests
 
 
+
+def _resolve_api_key(api_key_or_env: str) -> str:
+    """Support raw keys, ${ENV_VAR}, and bare env var names."""
+    if not api_key_or_env:
+        return ""
+    match = re.match(r"^\$\{(.+)\}$", api_key_or_env)
+    if match:
+        env_name = match.group(1)
+        value = os.environ.get(env_name)
+        if not value:
+            raise RuntimeError(f"Environment variable {env_name} is not set.")
+        return value
+    # Bare env var name (e.g. "MINIMAX_API_KEY") — if the string looks like an
+    # env var name (uppercase + underscores), require it to be set. Otherwise
+    # treat it as a literal key. This prevents a missing env var from being
+    # sent as a literal "Bearer MINIMAX_API_KEY", which MiniMax rejects with
+    # HTTP 401 and silently masks the real "key not configured" problem.
+    if re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", api_key_or_env):
+        env_value = os.environ.get(api_key_or_env)
+        if not env_value:
+            raise RuntimeError(f"Environment variable {api_key_or_env} is not set.")
+        return env_value
+    return api_key_or_env
+
+
+def _resolve_base_url(base_url_or_env: Optional[str], provider: str) -> str:
+    if base_url_or_env:
+        match = re.match(r"^\$\{(.+)\}$", base_url_or_env)
+        if match:
+            value = os.environ.get(match.group(1))
+            if value:
+                return value
+            raise RuntimeError(f"Environment variable {match.group(1)} is not set.")
+        return base_url_or_env
+    defaults = {
+        "openai": "https://api.openai.com/v1",
+        "xai": "https://api.x.ai/v1",
+        "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+        "minimax": "https://api.minimaxi.com/v1",
+    }
+    return defaults.get(provider, "https://api.openai.com/v1")
+
 def call_llm(
     prompt: str,
     provider: str,
@@ -21,9 +63,9 @@ def call_llm(
     temperature: float = 0.4,
     max_tokens: int = 2500,
 ) -> str:
-    api_key = os.environ.get(api_key_env)
+    api_key = _resolve_api_key(api_key_env)
     if not api_key:
-        raise RuntimeError(f"Environment variable {api_key_env} is not set.")
+        raise RuntimeError("API key is not configured.")
 
     # Provider-specific defaults
     if base_url is None:

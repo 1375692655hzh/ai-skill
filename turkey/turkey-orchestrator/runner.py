@@ -464,7 +464,6 @@ def execute_task(cfg: dict, task_name: str, logger: logging.Logger) -> dict:
     started = time.time()
     max_retries = int(task_cfg.get("max_retries", 2))
     retry_delay = int(task_cfg.get("retry_delay_sec", 300))
-    bht_verify_delay = int(task_cfg.get("bht_verify_delay_sec", 1800))
 
     # skip_keywords: 用于检测假日/周末/无数据的 stderr 关键词（可配置）
     skip_keywords = task_cfg.get("skip_keywords", ["holiday", "weekend", "no briefing", "skipped"])
@@ -566,7 +565,6 @@ def execute_task(cfg: dict, task_name: str, logger: logging.Logger) -> dict:
         # 匹配不到（full_file=None）。旧代码此处要求 full_file 存在才推送临时版
         # → 死代码 → 误判 gen_failed（09-29 踩坑）。修复：显式定位 fallback 文件，
         # 素材指纹去重后推送临时版并返回；BHT 二次校验交棒 00:10 补跑自动化
-        # （进程内 sleep bht_verify_delay 会超出单次执行 600s 上限，不可取）。
         marker = _find_bht_verify_marker(task_cfg, today_tr)
         if rc == 0 and marker and not full_file:
             fb_brief, fb_full = _fallback_output_paths(task_cfg, today_tr)
