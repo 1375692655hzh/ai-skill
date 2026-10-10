@@ -172,7 +172,7 @@ def qc_docx(path: Path, *, expect_stock_table: bool = True) -> dict:
     stock_table = tables[-1] if tables else None
     if stock_table is None and expect_stock_table:
         errors.append("stock table missing")
-    else:
+    if stock_table is not None:
         if len(stock_table.columns) != 4:
             errors.append(f"stock table has {len(stock_table.columns)} columns (expect 4)")
         if not all(c.text.strip() for c in stock_table.rows[0].cells):
