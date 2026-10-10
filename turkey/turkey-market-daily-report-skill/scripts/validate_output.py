@@ -29,10 +29,16 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
     if not (min_hotspots <= len(hotspots) <= max_hotspots):
         errors.append(f"热点条数 {len(hotspots)} 超出 {min_hotspots}-{max_hotspots}.")
 
-    for field in ("**事件介绍", "**影响分析", "**券商观点"):
-        n = len(re.findall(re.escape(field), hot_zone))
-        if n < len(hotspots):
-            errors.append(f"热点三字段不齐：{field} 只有 {n}/{len(hotspots)} 条.")
+    # 事件介绍必有；影响分析/券商观点有素材才写（用户规则：没有就省略，不许占位凑数）
+    n_intro = len(re.findall(r"\*\*事件介绍", hot_zone))
+    if n_intro < len(hotspots):
+        errors.append(f"事件介绍字段缺失：{len(hotspots) - n_intro} 条热点没有事件介绍.")
+    for m in re.finditer(
+        r"\*\*(?:影响分析|券商观点)[：:]\*\*\s*([^*\n]{0,40})"
+        r"(?:无新增|未单独点评|暂无|未见|无相关|缺乏)[^。]{0,12}(?:判断|观点|点评|内容)",
+        hot_zone,
+    ):
+        errors.append(f"占位句凑数（无观点应整段省略）: {m.group(0)[:50]}")
 
     table = text.split("## 二、个股分析", 1)[-1]
     rows = [
