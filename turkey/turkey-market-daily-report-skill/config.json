@@ -1,0 +1,41 @@
+{
+  "workdir": ".",
+  "output_dir": "output",
+  "cache_dir": ".cache/turkey-market-daily-report",
+  "target_date": "auto",
+  "inputs": {
+    "roots": {
+      "info_daily": "../turkey-info-daily-report-skill/output",
+      "x_influencer": "../turkey-x-influencer-report-skill/output",
+      "aa_morning": "../turkey-aa-morning-briefing-skill/output",
+      "close_report": "../turkey-close-report-skill/output",
+      "paraborsa": "../turkey-paraborsa-all-report-skill/output",
+      "morning_briefing": "../turkey-morning-report-skill/output",
+      "info_technical": "../turkey-info-technical-report-skill/output"
+    },
+    "patterns": {
+      "info_daily": "{date}_info_daily_report_zh.md",
+      "x_influencer": "{date}_x_influencer_full_zh.md",
+      "aa_morning": "{date}_aa_morning_briefing_zh.md",
+      "close_report": "{date}_close_report_zh.md",
+      "paraborsa": "{date}_paraborsa_all_report_zh.md",
+      "morning_briefing": "{date}_daily_briefing_zh.md",
+      "info_technical": "{date}_info_technical_report_zh.md"
+    },
+    "max_chars_per_input": 60000,
+    "x_max_chars": 150000
+  },
+  "llm": {
+    "provider": "minimax",
+    "model": "MiniMax-M3",
+    "api_key_env": "MINIMAX_API_KEY",
+    "base_url": "https://api.minimaxi.com/v1",
+    "temperature": 0.3,
+    "max_tokens": 16000
+  },
+  "docx": {
+    "font": "Noto Sans CJK SC",
+    "filename": "turkey_daily_{yyyymmdd}.docx"
+  },
+  "holidays": []
+}

@@ -300,9 +300,11 @@ def validate(text: str, *, source_facts: str | None = None) -> dict:
                 "Translate every sector name to Chinese."
             )
 
-    # 大盘概况 must contain a concrete BIST 100 close (5-digit number like 13xxx or 14xxx)
+    # 大盘概况 must contain a concrete BIST 100 close (5-digit level like 12xxx-15xxx;
+    # was hard-coded 1[3-5]xxx and false-flagged valid closes once the index fell
+    # below 13000 — observed 2026-10-09 close 12253.16).
     overview = _extract_section(text, "大盘概况")
-    if overview and not re.search(r"1[3-5]\s?\d{3}([.,]\d{1,2})?", overview):
+    if overview and not re.search(r"(?<!\d)1[0-9]\s?\d{3}([.,]\d{1,2})?(?!\d)", overview):
         errors.append(
             "[大盘概况] missing concrete BIST100 close figure (e.g. 13687.86); do not narrate."
         )
