@@ -1,0 +1,120 @@
+{
+  "resolve_target_date.py": {
+    "hkipo-update-skill": "06e2d9f4069a8c55",
+    "taiwan-afterhours-skill": "053872b21afdf75a",
+    "taiwan-premarket-skill": "053872b21afdf75a",
+    "turkey-aa-morning-briefing-skill": "3b9a45d47141c820",
+    "turkey-close-report-skill": "b7cfc1a9931709a7",
+    "turkey-info-daily-report-skill": "2aacd3098f70f9f5",
+    "turkey-info-technical-report-skill": "2aacd3098f70f9f5",
+    "turkey-morning-report-skill": "48a9546b60e55191",
+    "turkey-paraborsa-all-report-skill": "2aacd3098f70f9f5",
+    "turkey-x-influencer-report-skill": "61d122670a6c5376"
+  },
+  "runtime_utils.py": {
+    "hkipo-update-skill": "dc2c2a51ce6866b9",
+    "taiwan-afterhours-skill": "4bb967c6d30e4dee",
+    "taiwan-premarket-skill": "4bb967c6d30e4dee",
+    "turkey-aa-morning-briefing-skill": "9ed36873bab989ad",
+    "turkey-close-report-skill": "bec0bfbeca09f8d4",
+    "turkey-flash-news-skill": "bec0bfbeca09f8d4",
+    "turkey-info-daily-report-skill": "bec0bfbeca09f8d4",
+    "turkey-info-technical-report-skill": "bec0bfbeca09f8d4",
+    "turkey-market-daily-report-skill": "bec0bfbeca09f8d4",
+    "turkey-morning-report-skill": "bec0bfbeca09f8d4",
+    "turkey-paraborsa-all-report-skill": "bec0bfbeca09f8d4",
+    "turkey-x-influencer-report-skill": "942bdd8033d5444b"
+  },
+  "call_llm.py": {
+    "taiwan-afterhours-skill": "e9f3b9c849ef0c6b",
+    "taiwan-premarket-skill": "e9f3b9c849ef0c6b",
+    "turkey-aa-morning-briefing-skill": "6b1b5be6d37eda94",
+    "turkey-close-report-skill": "12dc2c0d2fff66bf",
+    "turkey-flash-news-skill": "53a0a58ee2144073",
+    "turkey-info-daily-report-skill": "a918fc4265c9cd44",
+    "turkey-info-technical-report-skill": "05af59b10994c317",
+    "turkey-market-daily-report-skill": "12dc2c0d2fff66bf",
+    "turkey-morning-report-skill": "faf1193f3b35d5b9",
+    "turkey-paraborsa-all-report-skill": "15e9be3c86ff466c",
+    "turkey-x-influencer-report-skill": "afff06292610bd4b"
+  },
+  "validate_output.py": {
+    "turkey-aa-morning-briefing-skill": "4793ea2bb23583a7",
+    "turkey-close-report-skill": "a8bfb378c0ae2e24",
+    "turkey-flash-news-skill": "c755edb46ce21423",
+    "turkey-info-daily-report-skill": "1cb8471438a9096f",
+    "turkey-info-technical-report-skill": "45bbc1eecc13b3ae",
+    "turkey-market-daily-report-skill": "aea63f4f554a0172",
+    "turkey-morning-report-skill": "286eebf13703d1e5",
+    "turkey-paraborsa-all-report-skill": "84fea84d3b1353de",
+    "turkey-x-influencer-report-skill": "d40eea6b8667efa8"
+  },
+  "bht_closing_fetcher.py": {
+    "turkey-close-report-skill": "b33b22016434b0f3",
+    "turkey-flash-news-skill": "27d954f0b7222bf3",
+    "turkey-morning-report-skill": "27d954f0b7222bf3"
+  },
+  "bht_fact_sheet.py": {
+    "turkey-close-report-skill": "99168710bdc1715a",
+    "turkey-morning-report-skill": "dd0de753f2199e6b"
+  },
+  "build_brief_prompt.py": {
+    "turkey-close-report-skill": "91bc5faacb70123e",
+    "turkey-morning-report-skill": "74e0d64013f95bff"
+  },
+  "build_prompt.py": {
+    "turkey-close-report-skill": "6a83bbd793d022b7",
+    "turkey-flash-news-skill": "2ba0dc191f73c765",
+    "turkey-info-daily-report-skill": "6edcff52375b4b13",
+    "turkey-info-technical-report-skill": "5fff19d0407080ac",
+    "turkey-market-daily-report-skill": "ac8a862e5b692c6d",
+    "turkey-morning-report-skill": "535709d69ea3509e"
+  },
+  "check_source_date.py": {
+    "turkey-close-report-skill": "c140f81b979bf786",
+    "turkey-info-daily-report-skill": "c140f81b979bf786",
+    "turkey-info-technical-report-skill": "c140f81b979bf786"
+  },
+  "fetch_live_quotes.py": {
+    "turkey-close-report-skill": "b44874fc59228e4a",
+    "turkey-morning-report-skill": "50fdd1f8e585447b"
+  },
+  "llm_runner.py": {
+    "turkey-close-report-skill": "cbc18b4975a0f482",
+    "turkey-flash-news-skill": "9aa760b4ed89d745",
+    "turkey-info-daily-report-skill": "5efc5a7df5761464",
+    "turkey-info-technical-report-skill": "5efc5a7df5761464",
+    "turkey-market-daily-report-skill": "cbc18b4975a0f482",
+    "turkey-morning-report-skill": "cbc18b4975a0f482",
+    "turkey-paraborsa-all-report-skill": "14bff10e8128cfb2",
+    "turkey-x-influencer-report-skill": "86ebdcc4fc75e128"
+  },
+  "sanitize_sources.py": {
+    "turkey-close-report-skill": "30180b2376683b34",
+    "turkey-flash-news-skill": "22a79f6d686952a6",
+    "turkey-info-daily-report-skill": "30180b2376683b34",
+    "turkey-info-technical-report-skill": "30180b2376683b34",
+    "turkey-market-daily-report-skill": "30180b2376683b34",
+    "turkey-morning-report-skill": "22a79f6d686952a6"
+  },
+  "source_header.py": {
+    "turkey-close-report-skill": "0d40fbc48daed27e",
+    "turkey-info-daily-report-skill": "0d40fbc48daed27e",
+    "turkey-info-technical-report-skill": "0d40fbc48daed27e",
+    "turkey-morning-report-skill": "0d40fbc48daed27e",
+    "turkey-paraborsa-all-report-skill": "0d40fbc48daed27e"
+  },
+  "validate_brief_output.py": {
+    "turkey-close-report-skill": "d3842b9829c876c6",
+    "turkey-flash-news-skill": "70d1a394cc4399d9",
+    "turkey-morning-report-skill": "991ca3bac351e983"
+  },
+  "fetch_bloomberght_closing.py": {
+    "turkey-flash-news-skill": "1e46629bd0af89f8",
+    "turkey-morning-report-skill": "1e46629bd0af89f8"
+  },
+  "fetch_via_project.py": {
+    "turkey-info-daily-report-skill": "d0630a18cd61a2ea",
+    "turkey-info-technical-report-skill": "d0630a18cd61a2ea"
+  }
+}
