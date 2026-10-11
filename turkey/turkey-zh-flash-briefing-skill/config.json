@@ -1,0 +1,12 @@
+{
+  "station_base": "http://192.168.110.214:8787/v1/items",
+  "api_key": "",
+  "api_key_env": "TURKEY_STATION_API_KEY",
+  "markets": "土耳其",
+  "kinds": "flash",
+  "data_dir": "tr_data",
+  "doc_title_prefix": "土耳其财经快讯简报",
+  "tencent_service": "tencent-docs",
+  "chunk_limit": 12000,
+  "request_timeout": 20
+}
