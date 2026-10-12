@@ -4,6 +4,50 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+
+
+def _norm_tr_token(token: str) -> str:
+    """Fold Turkish letters to ASCII so whitelist matching is spelling-proof
+    (İ→i, ş→s, ğ→g, ç→c, ö→o, ü→u；ı 无组合符可剥且 lower 不变，双侧同走
+    本函数所以自洽。Python 的 str.lower 对 İ 会产生组合变音符，故先 NFKD
+    再去组合符)."""
+    decomposed = unicodedata.normalize("NFKD", token)
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
+
+
+_TR_CHAR_RE = re.compile(r"[ğşıİçÇöÖüÜĞŞâîûÂÎÛ]")
+
+# 中文总结里合法保留的土语词：券商名/后缀（对齐上方 per-broker wall 正则的
+# 38 家清单）+ 常被原文引用的 BIST 权重股公司名与宏观缩写（模板要求用
+# ticker，但模型偶用专名，防止 ≥3 阈值误杀整报）。全部存归一化形式；
+# 含空格的短语永不匹配单 token，勿加。
+_TR_KEEP = {
+    _norm_tr_token(t)
+    for t in (
+        "Yatırım", "İnfo", "İntegral", "İş", "İcbc", "Ahlatcı", "Şeker",
+        "Ünlü", "Osmanlı", "Vakıf", "Ziraat", "Halk", "Garanti", "Gedik",
+        "Koç", "Türkiye", "İstanbul", "BİST", "İMKB", "TÜİK", "TÜSİAD", "MÜSİAD",
+        "Tüpraş", "Sabancı", "Türkcell", "Ereğli", "Karabük", "İşbank", "BİM",
+        "TÜFE", "ÜFE",
+    )
+}
+
+
+def _turkish_leak_words(text: str) -> list[str]:
+    """Words carrying Turkish-specific letters outside the keep-list — the
+    signature of the model copying source-language sentences instead of
+    translating them (tickers are ASCII and never counted)."""
+    words = re.findall(r"[A-Za-zğşıİçÇöÖüÜĞŞâîûÂÎÛ][A-Za-zğşıİçÇöÖüÜĞŞâîûÂÎÛ'’-]{1,}", text)
+    leaks: list[str] = []
+    for w in words:
+        if not _TR_CHAR_RE.search(w):
+            continue
+        parts = [p for p in re.split(r"['’-]", w) if p]
+        if all(_norm_tr_token(p) in _TR_KEEP for p in parts):
+            continue
+        leaks.append(w)
+    return leaks
 
 
 def _extract_summary_macro(text: str) -> str:
@@ -109,6 +153,22 @@ def validate_summary(text: str) -> dict:
     if "分歧点" not in text:
         warnings.append("Summary may be missing 分歧点.")
 
+    # Source-language leak: 素材是土语原文，模型容易整句复述而非翻译。
+    # ≥3 个白名单外土语词 = 硬错误（llm_runner 触发中文重写）；零星 1-2 个
+    # 可能是未收录的专有名词，降级 warning 避免误杀。
+    leaks = _turkish_leak_words(text)
+    if leaks:
+        samples = sorted(set(leaks))[:6]
+        distinct = {_norm_tr_token(w) for w in leaks}
+        if len(distinct) >= 3:
+            errors.append(
+                f"Turkish text leaked ({len(distinct)} distinct words, "
+                f"e.g. {', '.join(samples)}) — rewrite fully in Simplified "
+                "Chinese; only tickers/broker names/numbers may stay in original form."
+            )
+        else:
+            warnings.append(f"Possible Turkish words kept: {', '.join(samples)}")
+
     return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings, "length": len(text)}
 
 
@@ -131,7 +191,14 @@ def validate_report(text: str, *, min_articles: int = 1) -> dict:
     # Re-check summary synthesis rules on the full report
     sub = validate_summary(text)
     for e in sub["errors"]:
-        if e not in errors and "Summary too short" not in e and "summary section header" not in e:
+        if (
+            e not in errors
+            and "Summary too short" not in e
+            and "summary section header" not in e
+            # 拼接内容翻译失败时保留土语原文是设计内兜底，只在 summary 生成
+            # 路径上硬拦，全文复检不因拼接段的土语杀整份报告
+            and not e.startswith("Turkish text leaked")
+        ):
             errors.append(e)
     warnings.extend([w for w in sub["warnings"] if w not in warnings])
 

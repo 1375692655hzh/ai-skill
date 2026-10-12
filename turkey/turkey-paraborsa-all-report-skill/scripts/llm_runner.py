@@ -62,15 +62,26 @@ def generate_with_validation(
         for e in validation.get("errors", [])
         if "券商观点速览" in e or "structured slot" in e or "per-broker wall" in e
     ]
-    if not validation["ok"] and (length_errors or structure_errors):
+    turkish_errors = [
+        e for e in validation.get("errors", []) if e.startswith("Turkish text leaked")
+    ]
+    if not validation["ok"] and (length_errors or structure_errors or turkish_errors):
+        lang_rule = (
+            "全篇必须使用简体中文——素材是土耳其语原文，必须翻译改写，"
+            "严禁照抄原文词句；只有股票代码、券商名、通用缩写（TCMB/S&P/CPI 等）"
+            "和数字可以保留原文。"
+            if turkish_errors
+            else ""
+        )
         fix_prompt = (
             prompt
             + "\n\n【重要修订】上一版不合格："
-            + "；".join(structure_errors + length_errors)
+            + "；".join(structure_errors + length_errors + turkish_errors)
             + "。请重写【综合总结】："
             "券商观点速览必须且只能写成三行——"
             "技术位共识：……\\n宏观与事件：……\\n资金与标的：……；"
             "禁止 A1 Capital：/Destek：这类逐家罗列；完整原文不在速览里。"
+            + lang_rule
         )
         try:
             output = call_llm(
