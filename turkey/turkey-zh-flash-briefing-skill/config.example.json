@@ -1,5 +1,5 @@
 {
-  "_comment": "复制为 config.json 并填写。两个 key 建议留空走环境变量，避免提交进仓库：api_key_env（局域网数据站）、llm.api_key_env（LLM，任意 OpenAI 兼容端点）。",
+  "_comment": "复制为 config.json 并填写。两个 key 建议留空走环境变量，避免提交进仓库：api_key_env（局域网数据站）、llm.api_key_env（LLM，任意 OpenAI 兼容端点）。mcporter_path 留空即从 PATH 查找 mcporter；解析失败时填完整可执行文件路径。",
   "station_base": "http://192.168.110.214:8787/v1/items",
   "api_key": "",
   "api_key_env": "TURKEY_STATION_API_KEY",
@@ -8,6 +8,7 @@
   "data_dir": "tr_data",
   "doc_title_prefix": "土耳其财经快讯简报",
   "tencent_service": "tencent-docs",
+  "mcporter_path": "",
   "chunk_limit": 12000,
   "request_timeout": 20,
   "llm": {

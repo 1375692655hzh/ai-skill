@@ -7,6 +7,7 @@
   "data_dir": "tr_data",
   "doc_title_prefix": "土耳其财经快讯简报",
   "tencent_service": "tencent-docs",
+  "mcporter_path": "",
   "chunk_limit": 12000,
   "request_timeout": 20,
   "llm": {

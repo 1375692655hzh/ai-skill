@@ -14,7 +14,7 @@ tr_daily.py — 土耳其财经快讯每日简报管线（局域网数据站 →
 
 agent 工作流（编译/摘要/验证/汇报）见 SKILL.md。
 """
-import json, os, re, subprocess, sys, urllib.parse, urllib.request
+import json, os, re, shutil, subprocess, sys, urllib.parse, urllib.request
 
 DEF_CFG = {
     "station_base": "http://192.168.110.214:8787/v1/items",
@@ -27,6 +27,7 @@ DEF_CFG = {
     "tencent_service": "tencent-docs",
     "chunk_limit": 12000,
     "request_timeout": 20,
+    "mcporter_path": "",
 }
 
 
@@ -261,14 +262,14 @@ def cmd_build(since_dt, summary=None, dry_run=False, force=False):
         return
 
     def tdoc_call(tool, args):
-        args_path = os.path.join(data_dir(), "_tdoc_tmp_args.json")
-        json.dump(args, open(args_path, "w", encoding="utf-8"), ensure_ascii=False)
-        bp = args_path.replace("\\", "/")
-        if re.match(r"^[A-Za-z]:", bp):
-            bp = "/" + bp[0].lower() + bp[2:]
-        cmd = f"mcporter call '{c('tencent_service')}' '{tool}' --args \"$(cat '{bp}')\""
-        r = subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True,
-                           timeout=120, errors="replace")
+        """直连 mcporter（不经 shell）：分块 ≤12KB 远小于各平台单参数上限。
+        不写死 bash —— Windows 上裸 'bash' 可能被 PATH 解析成 WSL bash 导致失败。"""
+        exe = c("mcporter_path") or shutil.which("mcporter")
+        if not exe:
+            raise SystemExit("!! 找不到 mcporter：请安装 mcporter 或在 config 设置 mcporter_path")
+        payload = json.dumps(args, ensure_ascii=False)
+        r = subprocess.run([exe, "call", c("tencent_service"), tool, "--args", payload],
+                           capture_output=True, text=True, timeout=120, errors="replace")
         out = (r.stdout or r.stderr).strip()
         try:
             return json.loads(re.search(r"\{.*\}", out, re.S).group(0))
