@@ -30,13 +30,14 @@
     "taiwan-premarket-skill": "e9f3b9c849ef0c6b",
     "turkey-aa-morning-briefing-skill": "6b1b5be6d37eda94",
     "turkey-close-report-skill": "12dc2c0d2fff66bf",
-    "turkey-flash-news-skill": "53a0a58ee2144073",
+    "turkey-flash-news-skill": "d10fa93be1b44e92",
     "turkey-info-daily-report-skill": "a918fc4265c9cd44",
     "turkey-info-technical-report-skill": "05af59b10994c317",
     "turkey-market-daily-report-skill": "12dc2c0d2fff66bf",
-    "turkey-morning-report-skill": "faf1193f3b35d5b9",
+    "turkey-morning-report-skill": "ab4f05d355fdbe0b",
     "turkey-paraborsa-all-report-skill": "15e9be3c86ff466c",
-    "turkey-x-influencer-report-skill": "afff06292610bd4b"
+    "turkey-x-influencer-report-skill": "afff06292610bd4b",
+    "turkey-zh-flash-briefing-skill": "d10fa93be1b44e92"
   },
   "validate_output.py": {
     "turkey-aa-morning-briefing-skill": "4793ea2bb23583a7",
@@ -68,7 +69,8 @@
     "turkey-info-daily-report-skill": "6edcff52375b4b13",
     "turkey-info-technical-report-skill": "5fff19d0407080ac",
     "turkey-market-daily-report-skill": "ac8a862e5b692c6d",
-    "turkey-morning-report-skill": "535709d69ea3509e"
+    "turkey-morning-report-skill": "535709d69ea3509e",
+    "turkey-zh-flash-briefing-skill": "fe3010bfb3bde33c"
   },
   "check_source_date.py": {
     "turkey-close-report-skill": "c140f81b979bf786",
@@ -87,7 +89,8 @@
     "turkey-market-daily-report-skill": "aa485434b6b050fc",
     "turkey-morning-report-skill": "cbc18b4975a0f482",
     "turkey-paraborsa-all-report-skill": "14bff10e8128cfb2",
-    "turkey-x-influencer-report-skill": "86ebdcc4fc75e128"
+    "turkey-x-influencer-report-skill": "86ebdcc4fc75e128",
+    "turkey-zh-flash-briefing-skill": "027114dede840547"
   },
   "sanitize_sources.py": {
     "turkey-close-report-skill": "30180b2376683b34",
@@ -116,5 +119,9 @@
   "fetch_via_project.py": {
     "turkey-info-daily-report-skill": "d0630a18cd61a2ea",
     "turkey-info-technical-report-skill": "d0630a18cd61a2ea"
+  },
+  "generate_briefing.py": {
+    "turkey-morning-report-skill": "d124976766883f85",
+    "turkey-zh-flash-briefing-skill": "8914619cbcae43fe"
   }
 }
