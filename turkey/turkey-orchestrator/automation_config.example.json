@@ -19,17 +19,29 @@
       "enabled": true,
       "title_prefix": "土耳其股市早报",
       "skill_dir": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-morning-report-skill",
-      "command": ["python", "scripts/generate_briefing.py", "--config", "config.json"],
+      "command": [
+        "python",
+        "scripts/generate_briefing.py",
+        "--config",
+        "config.json"
+      ],
       "run_cwd": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-morning-report-skill",
       "env_file": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-morning-report-skill\\.env",
       "output_dir": "output",
       "brief_pattern": "{date}_daily_briefing_brief_zh.md",
       "full_pattern": "{date}_daily_briefing_zh.md",
-      "push_groups": ["feishu_app_morning"],
+      "push_groups": [
+        "feishu_app_morning"
+      ],
       "send_full_as_file": true,
       "brief_optional": false,
       "skip_if_exists": true,
-      "skip_keywords": ["holiday", "weekend", "no briefing", "skipped"],
+      "skip_keywords": [
+        "holiday",
+        "weekend",
+        "no briefing",
+        "skipped"
+      ],
       "max_retries": 2,
       "retry_delay_sec": 300,
       "push_retries": 3,
@@ -39,7 +51,12 @@
       "enabled": true,
       "title_prefix": "土耳其股市收评",
       "skill_dir": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-close-report-skill",
-      "command": ["python", "scripts/generate_close_report.py", "--config", "config.json"],
+      "command": [
+        "python",
+        "scripts/generate_close_report.py",
+        "--config",
+        "config.json"
+      ],
       "run_cwd": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-close-report-skill",
       "env_file": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-close-report-skill\\.env",
       "output_dir": "output",
@@ -47,12 +64,19 @@
       "full_pattern": "{date}_close_report_zh.md",
       "fallback_brief_pattern": "{date}_close_report_fallback_brief_zh.md",
       "fallback_full_pattern": "{date}_close_report_fallback_zh.md",
-      "push_groups": ["feishu_app_morning"],
+      "push_groups": [
+        "feishu_app_morning"
+      ],
       "send_full_as_file": true,
       "brief_optional": false,
       "skip_if_exists": false,
       "source_fingerprint_dedup": true,
-      "skip_keywords": ["holiday", "weekend", "no close", "skipped"],
+      "skip_keywords": [
+        "holiday",
+        "weekend",
+        "no close",
+        "skipped"
+      ],
       "max_retries": 2,
       "retry_delay_sec": 300,
       "bht_verify_delay_sec": 1800,
@@ -63,17 +87,29 @@
       "enabled": true,
       "title_prefix": "Info每日市场分析",
       "skill_dir": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-info-daily-report-skill",
-      "command": ["python", "scripts/generate_info_daily_report.py", "--config", "config.json"],
+      "command": [
+        "python",
+        "scripts/generate_info_daily_report.py",
+        "--config",
+        "config.json"
+      ],
       "run_cwd": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-info-daily-report-skill",
       "env_file": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-info-daily-report-skill\\.env",
       "output_dir": "output",
       "brief_pattern": "",
       "full_pattern": "{date}_info_daily_report_zh.md",
-      "push_groups": ["feishu_app_morning"],
+      "push_groups": [
+        "feishu_app_morning"
+      ],
       "send_full_as_file": true,
       "brief_optional": true,
       "skip_if_exists": true,
-      "skip_keywords": ["holiday", "weekend", "not_found", "skipped"],
+      "skip_keywords": [
+        "holiday",
+        "weekend",
+        "not_found",
+        "skipped"
+      ],
       "max_retries": 2,
       "retry_delay_sec": 300,
       "push_retries": 3,
@@ -83,17 +119,29 @@
       "enabled": true,
       "title_prefix": "Info技术分析报告",
       "skill_dir": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-info-technical-report-skill",
-      "command": ["python", "scripts/generate_info_technical_report.py", "--config", "config.json"],
+      "command": [
+        "python",
+        "scripts/generate_info_technical_report.py",
+        "--config",
+        "config.json"
+      ],
       "run_cwd": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-info-technical-report-skill",
       "env_file": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-info-technical-report-skill\\.env",
       "output_dir": "output",
       "brief_pattern": "",
       "full_pattern": "{date}_info_technical_report_zh.md",
-      "push_groups": ["feishu_app_morning"],
+      "push_groups": [
+        "feishu_app_morning"
+      ],
       "send_full_as_file": true,
       "brief_optional": true,
       "skip_if_exists": true,
-      "skip_keywords": ["holiday", "weekend", "not_found", "skipped"],
+      "skip_keywords": [
+        "holiday",
+        "weekend",
+        "not_found",
+        "skipped"
+      ],
       "max_retries": 2,
       "retry_delay_sec": 300,
       "push_retries": 3,
@@ -103,17 +151,29 @@
       "enabled": true,
       "title_prefix": "AA通讯社晨报",
       "skill_dir": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-aa-morning-briefing-skill",
-      "command": ["python", "scripts/generate_aa_morning_briefing.py", "--config", "config.json"],
+      "command": [
+        "python",
+        "scripts/generate_aa_morning_briefing.py",
+        "--config",
+        "config.json"
+      ],
       "run_cwd": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-aa-morning-briefing-skill",
       "env_file": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-aa-morning-briefing-skill\\.env",
       "output_dir": "output",
       "brief_pattern": "",
       "full_pattern": "{date}_aa_morning_briefing_zh.md",
-      "push_groups": ["feishu_app_morning"],
+      "push_groups": [
+        "feishu_app_morning"
+      ],
       "send_full_as_file": true,
       "brief_optional": true,
       "skip_if_exists": true,
-      "skip_keywords": ["holiday", "skipped", "no article", "not found"],
+      "skip_keywords": [
+        "holiday",
+        "skipped",
+        "no article",
+        "not found"
+      ],
       "max_retries": 2,
       "retry_delay_sec": 300,
       "push_retries": 3,
@@ -123,17 +183,29 @@
       "enabled": true,
       "title_prefix": "Paraborsa券商评论",
       "skill_dir": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-paraborsa-all-report-skill",
-      "command": ["python", "scripts/generate_paraborsa_all_report.py", "--config", "config.json"],
+      "command": [
+        "python",
+        "scripts/generate_paraborsa_all_report.py",
+        "--config",
+        "config.json"
+      ],
       "run_cwd": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-paraborsa-all-report-skill",
       "env_file": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-paraborsa-all-report-skill\\.env",
       "output_dir": "output",
       "brief_pattern": "",
       "full_pattern": "{date}_paraborsa_all_report_zh.md",
-      "push_groups": ["feishu_app_morning"],
+      "push_groups": [
+        "feishu_app_morning"
+      ],
       "send_full_as_file": true,
       "brief_optional": true,
       "skip_if_exists": true,
-      "skip_keywords": ["holiday", "weekend", "no posts", "skipped"],
+      "skip_keywords": [
+        "holiday",
+        "weekend",
+        "no posts",
+        "skipped"
+      ],
       "max_retries": 2,
       "retry_delay_sec": 300,
       "push_retries": 3,
@@ -143,28 +215,46 @@
       "enabled": true,
       "title_prefix": "X/K影响力精选",
       "skill_dir": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-x-influencer-report-skill",
-      "command": ["python", "scripts/generate_x_influencer_report.py", "--config", "config.json"],
+      "command": [
+        "python",
+        "scripts/generate_x_influencer_report.py",
+        "--config",
+        "config.json"
+      ],
       "run_cwd": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-x-influencer-report-skill",
       "env_file": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-x-influencer-report-skill\\.env",
       "output_dir": "output",
       "brief_pattern": "{date}_x_influencer_curated_zh.md",
       "full_pattern": "{date}_x_influencer_full_zh.md",
-      "push_groups": ["feishu_app_morning"],
+      "push_groups": [
+        "feishu_app_morning"
+      ],
       "send_full_as_file": true,
       "brief_optional": false,
       "skip_if_exists": true,
-      "skip_keywords": ["holiday", "weekend", "no posts", "skipped"],
+      "skip_keywords": [
+        "holiday",
+        "weekend",
+        "no posts",
+        "skipped"
+      ],
       "max_retries": 2,
       "retry_delay_sec": 300,
       "push_retries": 3,
       "push_retry_delay_sec": 10
-    }
-  },
+    },
     "zh_flash_briefing": {
       "enabled": true,
       "title_prefix": "土耳其财经快讯简报",
       "skill_dir": "C:/Users/Admin/.workbuddy/skills/turkey-zh-flash-briefing-skill",
-      "command": ["python", "scripts/generate_briefing.py", "--config", "config.json", "--hours", "16"],
+      "command": [
+        "python",
+        "scripts/generate_briefing.py",
+        "--config",
+        "config.json",
+        "--hours",
+        "16"
+      ],
       "run_cwd": "C:/Users/Admin/.workbuddy/skills/turkey-zh-flash-briefing-skill",
       "output_dir": "output",
       "full_pattern": "土耳其快讯_{date}_中文简报*.md",
@@ -172,10 +262,16 @@
       "send_full_as_file": true,
       "brief_optional": true,
       "skip_if_exists": true,
-      "skip_keywords": ["skip:", "0 条", "拒绝"],
+      "skip_keywords": [
+        "skip:",
+        "0 条",
+        "拒绝"
+      ],
       "max_retries": 2,
       "retry_delay_sec": 300,
       "push_retries": 3,
-      "push_retry_delay_sec": 10
+      "push_retry_delay_sec": 10,
+      "_note": "skill_dir/run_cwd 为示例路径，部署后请改成实际目录；key 走各 skill 目录 .env 或环境变量"
     }
+  }
 }
