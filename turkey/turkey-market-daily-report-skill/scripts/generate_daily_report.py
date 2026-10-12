@@ -118,14 +118,38 @@ def main() -> int:
         return 2
 
     from llm_runner import generate_with_validation
-    from validate_output import validate
+    from validate_output import strip_no_view_blocks, validate
 
     content, result = generate_with_validation(prompt, llm_cfg, validate)
-    if content is None or not result.get("ok"):
-        if content:
-            (cache_dir / f"daily_raw_{target.isoformat()}.txt").write_text(content, encoding="utf-8")
+    if content is None:
         _log(f"Validation failed: {result.get('errors', [])}")
         return 1
+    if not result.get("ok"):
+        # Deterministic salvage: no-view blocks (pure level lists / index rows /
+        # placeholder fields) are stripped in code instead of burning more LLM
+        # retries — the model keeps re-including bulk broker sweeps.
+        strippable = ("纯技术位罗列", "不得进入个股分析", "个股块首行缺少", "个股块缺少观点行")
+        only_title = all("missing report title" in e for e in result.get("errors", [])) and "土耳其股市热点日报" in content
+        if only_title:
+            # The model sometimes fences the title in ``` or drops the "# " prefix.
+            import re as _re
+
+            def _fix_title(m):
+                return "# " + m.group(1).strip("` \n")
+
+            content = _re.sub(r"```+\s*\n?土耳其股市热点日报[｜|][^\n`]*```?", _fix_title, content, count=1)
+            if "# 土耳其股市热点日报" not in content:
+                content = _re.sub(r"(?m)^(?#!)(土耳其股市热点日报[｜|][^\n]*)$", r"# \1", content, count=1)
+            result = validate(content)
+            _log(f"Title normalized; re-validate ok={result.get('ok')}")
+        elif all(any(marker in e for marker in strippable) for e in result.get("errors", [])):
+            content, removed = strip_no_view_blocks(content)
+            result = validate(content)
+            _log(f"Deterministic strip: -{removed} no-view blocks; re-validate ok={result.get('ok')}")
+        if not result.get("ok"):
+            (cache_dir / f"daily_raw_{target.isoformat()}.txt").write_text(content, encoding="utf-8")
+            _log(f"Validation failed: {result.get('errors', [])}")
+            return 1
     if result.get("warnings"):
         _log(f"Validation warnings: {result['warnings']}")
     _log(f"hotspots={result.get('hotspots')} stock_rows={result.get('stock_rows')}")

@@ -8,6 +8,52 @@ import re
 
 
 
+LEVEL_WORDS = ("支撑", "阻力", "均线", "压力位", "支撑位", "阻力位")
+DIRECTION_WORDS = ("突破", "跌破", "站稳", "守稳", "守住", "失守", "上看", "下看", "看涨", "看跌", "看多", "看空", "多头", "空头", "上行", "下行", "转弱", "转强", "走弱", "走强", "反弹", "回调", "上攻", "破坏", "目标价", "买入", "卖出", "增持", "减持", "低估", "高估", "订单", "利润", "增长")
+INDEX_PREFIX_RE = re.compile(r"^(?:XU\s?\d+|BIST\s?\d*|XBANK)")
+
+
+def block_is_no_view(blk: str) -> bool:
+    """True if a stock block must be dropped: index row, placeholder fields,
+    or levels without any direction/condition/thesis (user rule 2026-10-12)."""
+    lines = [ln.strip() for ln in blk.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    fields = [f.strip() for f in lines[0].split("｜")]
+    if len(fields) != 3 or not all(fields) or any(f in ("不适用", "无", "N/A") for f in fields):
+        return True
+    if INDEX_PREFIX_RE.match(fields[0].upper()):
+        return True
+    body = blk
+    has_level = any(w in body for w in LEVEL_WORDS)
+    has_dir = any(w in body for w in DIRECTION_WORDS) or any(
+        w in body for w in ("业绩", "订单", "并购", "要约", "分红", "回购")
+    )
+    return has_level and not has_dir
+
+
+def strip_no_view_blocks(text: str) -> tuple[str, int]:
+    """Remove no-view stock blocks from the 个股分析 section deterministically.
+    Returns (new_text, removed_count). Non-stock paragraphs (声明 etc.) stay."""
+    import re as _re
+    m = _re.search(r"(?m)^(## 二、个股分析[^\n]*)\n(.*?)(?=^## |\Z)", text, _re.S | _re.M)
+    if not m:
+        return text, 0
+    heading, body = m.group(1), m.group(2)
+    kept, removed = [], 0
+    for blk in _re.split(r"\n\s*\n", body):
+        s = blk.strip()
+        if not s:
+            continue
+        looks_stock = "｜" in s.splitlines()[0] and not s.startswith(("*", "-", "声明"))
+        if looks_stock and block_is_no_view(s):
+            removed += 1
+            continue
+        kept.append(s)
+    new_body = "\n\n".join(kept)
+    return text[: m.start()] + heading + "\n\n" + new_body + "\n" + text[m.end():], removed
+
+
 def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict:
     errors: list[str] = []
     warnings: list[str] = []
@@ -57,6 +103,7 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
     judgment_words = ("支撑", "阻力", "突破", "跌破", "均线", "通道", "业绩", "订单", "利润", "估值", "PE", "并购", "要约", "指数调整", "MSCI", "FTSE", "低估", "高估", "产能", "负债")
     bad_heads = 0
     flow_only = 0
+    pure_levels = 0
     seen_tickers: list[str] = []
     INDEX_RE = re.compile(r"^(?:XU\s?\d+|BIST\s?\d*|XBANK)$")
     NESTED_HEAD_RE = re.compile(r"^[A-Z][A-Z0-9.]{1,9}(?:[\s\u3000]|$)")
@@ -77,7 +124,9 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
                 break
         # chat-friendly block: first line carries 名称｜定位｜决策 (no collapse).
         fields = [f.strip() for f in first.split("｜")]
-        if len(fields) != 3 or not all(fields):
+        # "不适用"-style placeholder fields mark meta/junk blocks (observed:
+        # a broker bulk-sweep residue head "KREDİ KARTI DEĞİL｜不适用｜不适用").
+        if len(fields) != 3 or not all(fields) or any(f in ("不适用", "无", "N/A") for f in fields):
             bad_heads += 1
             continue
         if len(lines) < 2:
@@ -103,8 +152,19 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
         has_judgment = any(w in blk for w in judgment_words)
         if has_flow and not has_judgment:
             flow_only += 1
+        # Pure level-quoting technical sweep = no view (user rule 2026-10-12):
+        # levels present but no direction/condition/thesis anywhere in the block.
+        level_words = ("支撑", "阻力", "均线", "压力位", "支撑位", "阻力位")
+        direction_words = ("突破", "跌破", "站稳", "守稳", "守住", "失守", "上看", "下看", "看涨", "看跌", "看多", "看空", "多头", "空头", "上行", "下行", "转弱", "转强", "走弱", "走强", "反弹", "回调", "上攻", "破坏", "目标价", "买入", "卖出", "增持", "减持", "低估", "高估", "订单", "利润", "增长")
+        if any(w in blk for w in level_words) and not any(w in blk for w in direction_words):
+            pure_levels += 1
+            continue
     if bad_heads:
         errors.append(f"个股块首行缺少「名称｜定位｜决策」三字段分隔: {bad_heads} 块.")
+    if pure_levels:
+        errors.append(
+            f"个股块有 {pure_levels} 块为纯技术位罗列（支撑/阻力位无方向条件判断＝无观点，须整块删除）."
+        )
     if flow_only:
         warnings.append(f"个股块有 {flow_only} 个疑似纯资金榜（无实质判断词），规范 §8 不允许单独成块.")
     if not stock_rows:

@@ -71,6 +71,7 @@ def generate_with_validation(
         or "转载腔句式" in e
         or "个股块之间必须空行" in e
         or "个股块缺少观点行" in e
+        or "纯技术位罗列" in e
         or "热点条数" in e
         or "事件介绍字段缺失" in e
     ]
