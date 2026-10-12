@@ -55,6 +55,8 @@ metadata:
 
 **北京 16:35（TRT 11:35）**：当日 X（15:30 生成）、AA（14:10 兜底后）、Info 就绪，前日收评/Paraborsa 隔夜已备——全部当日素材齐活。同事的 TRT 06:00 早班模式也可（北京 11:00），届时 AA 当日未出会自动回退前一日并在资料范围注明。周一/假日后首跑，回退窗口 4 天自动覆盖。
 
+编排器契约：`scripts/resolve_target_date.py` 供 turkey-orchestrator 预解析 today_tr（skip-if-exists / run-log 锚点）；语义与 `resolve_inputs.resolve_target_date` 一致（TR 今日、不回退周末），勿替换成收评版（回退语义会查错文件名）。
+
 ## Example
 
 ```bash

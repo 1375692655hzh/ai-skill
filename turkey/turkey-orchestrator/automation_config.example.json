@@ -1,5 +1,5 @@
 {
-  "_comment": "土耳其报告自动化配置模板。复制为 automation_config.json 并填入真实凭据。7个skill统一管理。简约版(brief)发文本到飞书群，原稿版(full)发文件到飞书群。",
+  "_comment": "土耳其报告自动化配置模板。复制为 automation_config.json 并填入真实凭据。9个任务统一管理。简约版(brief)发文本到飞书群，原稿版(full)发文件到飞书群。",
   "logging": {
     "log_dir": "logs",
     "level": "INFO"
@@ -242,6 +242,33 @@
       "retry_delay_sec": 300,
       "push_retries": 3,
       "push_retry_delay_sec": 10
+    },
+    "market_daily": {
+      "enabled": true,
+      "title_prefix": "土耳其股市热点日报",
+      "skill_dir": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-market-daily-report-skill",
+      "command": [
+        "python",
+        "scripts/generate_daily_report.py",
+        "--config",
+        "config.json"
+      ],
+      "run_cwd": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-market-daily-report-skill",
+      "env_file": "C:\\Users\\Admin\\.workbuddy\\skills\\turkey-market-daily-report-skill\\.env",
+      "output_dir": "output",
+      "brief_pattern": "",
+      "full_pattern": "{date}_market_daily_zh.md",
+      "push_groups": [
+        "feishu_app_morning"
+      ],
+      "send_full_as_file": true,
+      "brief_optional": true,
+      "skip_if_exists": true,
+      "max_retries": 2,
+      "retry_delay_sec": 300,
+      "push_retries": 3,
+      "push_retry_delay_sec": 10,
+      "_note": "热点日报只有 full 无 brief：brief_optional 必须为 true，否则每轮误告警 brief 缺失。禁止设 source_fingerprint_dedup（素材指纹提取器为收评专用，None 指纹会让当日已存在时短路且不推送，违反执行即推）。上游素材缺失会自动回退前日并注明，不存在 holiday/weekend 跳过路径，故不配 skip_keywords。推荐每个工作日北京 16:35（TRT 11:35）触发。"
     },
     "zh_flash_briefing": {
       "enabled": true,

@@ -63,6 +63,8 @@ def main() -> int:
     _load_env_file(skill_dir)
 
     bundle = collect_inputs(cfg)
+    # 编排器从 stderr 抓这个标记锚定 today_tr（runner.parse_today_tr）
+    _log(f"Today (TR): {bundle['target_date'].isoformat()}")
     _log("Input bundle:\n" + _input_report(bundle))
 
     missing = bundle["missing_core"]
