@@ -7,6 +7,10 @@
 - `turkey-flash-news-skill` 面向**土耳其本地源直采**（KAP/TCMB/RSS）产出星级快讯流；本 skill 面向**局域网数据站的 aggregator 流**产出**给中国读者的人译简报**（腾讯文档交付），两者互补
 - 上云依赖 mcporter(tencent-docs)；推送飞书/企微可接 `../turkey-orchestrator/`
 
+## 全自动模式
+
+`scripts/generate_briefing.py` 端到端：LLM 中文编译（三轮校验/修复回路，校验含条数/空标题/key 真实子串/match leftover）→ 摘要 → 上云 → 打印验收单。可接 `../turkey-orchestrator/` 统一调度（任务名 `zh_flash_briefing`）。详见 `WORKFLOW.md`。
+
 ## 亮点：三道硬闸
 
 参数错就拒绝执行，不产出烂文档（全部来自真实事故，详见 `references/pipeline-and-gates.md`）：

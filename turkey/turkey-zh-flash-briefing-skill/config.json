@@ -8,5 +8,13 @@
   "doc_title_prefix": "土耳其财经快讯简报",
   "tencent_service": "tencent-docs",
   "chunk_limit": 12000,
-  "request_timeout": 20
+  "request_timeout": 20,
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key_env": "TURKEY_BRIEFING_LLM_API_KEY",
+    "base_url": "",
+    "temperature": 0.2,
+    "max_tokens": 8000
+  }
 }

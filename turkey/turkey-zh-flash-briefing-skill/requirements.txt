@@ -1,4 +1,5 @@
-# 纯 Python 标准库，无需 pip 安装。
+# LLM 中文编译阶段需要 requests（OpenAI 兼容调用器）；其余纯标准库。
+requests
 # 外部依赖：
 #   1) mcporter CLI + tencent-docs skill 授权（上云腾讯文档用，一次性配置）
 #   2) 局域网数据站 ai-auto-gen 供数服务（默认 http://192.168.110.214:8787）

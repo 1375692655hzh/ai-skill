@@ -71,18 +71,30 @@ key 通过环境变量（`config.json` 的 `api_key_env`，默认 `TURKEY_STATIO
 - **Write 工具写大 JSON 会截断** → 分片写 + `scripts/merge_zh_parts.py` 合并校验
 - **build 用当前时钟重算窗口会与 fetch 数据档错位** → 已改为自动挂接最新 `*_items.json` 档，勿绕过
 
+## 两种生产模式
+
+- **模式 A（全自动，推荐接入编排器）**：`scripts/generate_briefing.py` 一条命令端到端——编译由 LLM 完成（三轮校验/修复回路：条数/空标题/key 真实子串/leftover 全查，不过即失败退出，绝不降级发布）。工作流、cron 与编排器任务示例见 **`WORKFLOW.md`**。
+- **模式 B（agent，质量上限最高）**：本文件"每日七步"，编译/分级由 agent 逐条人工完成。日常人工跑或质量复核日用此模式。
+
+两种模式产出同一份验收单（条数/窗口/🔴清单/文档链接）——**条数与数据站窗口不符、或🔴缺明显的油价/军事/央行条目，即不合格产出**。
+
 ## Files
 
 ```
-SKILL.md              本文件（agent 工作流与铁律）
-config.json           运行配置（api_key 留空，走环境变量）
-config.example.json   配置模板
-requirements.txt      纯标准库，无需安装；依赖外部 mcporter CLI
-QUICKSTART.md         部署与 cron 快速上手
-README.md             概览
-scripts/tr_daily.py   管线：fetch / build（含三闸与上云）
-scripts/retry_append.py   上传分块 405 补发
-scripts/merge_zh_parts.py 编译分片合并 + 对账匹配（leftover=0 才放行）
+SKILL.md                     本文件（agent 工作流与铁律）
+WORKFLOW.md                  工作流：两种模式 / cron / 编排器接入 / 验收单
+config.json                  运行配置（两个 api_key 留空，走环境变量）
+config.example.json          配置模板
+requirements.txt             LLM 阶段需 requests；其余纯标准库
+QUICKSTART.md                部署与 cron 快速上手
+README.md                    概览
+scripts/generate_briefing.py 端到端入口（fetch → LLM 编译 → 摘要 → build → 验收单）
+scripts/tr_daily.py          管线：fetch / build（含三闸与上云）
+scripts/build_prompt.py      中文编译/摘要 prompt 构造
+scripts/llm_runner.py        LLM 生成 + 校验 + 带反馈修复回路
+scripts/call_llm.py          通用 OpenAI 兼容调用器（与 flash-news skill 同源）
+scripts/retry_append.py      上传分块 405 补发
+scripts/merge_zh_parts.py    编译分片合并 + 对账匹配（leftover=0 才放行）
 references/zh-translation-spec.md   分级标准 / key 规则 / 常见编译事故
 references/tencent-docs-upload.md   腾讯文档上云与验证细节
 references/pipeline-and-gates.md    三道硬闸的设计依据与事故清单

@@ -159,5 +159,23 @@
       "push_retries": 3,
       "push_retry_delay_sec": 10
     }
-  }
+  },
+    "zh_flash_briefing": {
+      "enabled": true,
+      "title_prefix": "土耳其财经快讯简报",
+      "skill_dir": "C:/Users/Admin/.workbuddy/skills/turkey-zh-flash-briefing-skill",
+      "command": ["python", "scripts/generate_briefing.py", "--config", "config.json", "--hours", "16"],
+      "run_cwd": "C:/Users/Admin/.workbuddy/skills/turkey-zh-flash-briefing-skill",
+      "output_dir": "output",
+      "full_pattern": "土耳其快讯_{date}_中文简报*.md",
+      "brief_pattern": "",
+      "send_full_as_file": true,
+      "brief_optional": true,
+      "skip_if_exists": true,
+      "skip_keywords": ["skip:", "0 条", "拒绝"],
+      "max_retries": 2,
+      "retry_delay_sec": 300,
+      "push_retries": 3,
+      "push_retry_delay_sec": 10
+    }
 }

@@ -27,7 +27,7 @@
 python runner.py --task close_report --config automation_config.json
 ```
 
-任务名：`morning_briefing` / `close_report` / `info_daily` / `info_technical` / `aa_morning_briefing` / `paraborsa_all` / `x_influencer`
+任务名：`morning_briefing` / `close_report` / `info_daily` / `info_technical` / `aa_morning_briefing` / `paraborsa_all` / `x_influencer` / `zh_flash_briefing`
 
 退出码 0 = `ok` / `ok_fallback` / `skipped_holiday` / `skipped_exists`。
 
