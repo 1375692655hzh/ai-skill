@@ -143,9 +143,19 @@ def main() -> int:
             result = validate(content)
             _log(f"Title normalized; re-validate ok={result.get('ok')}")
         elif all(any(marker in e for marker in strippable) for e in result.get("errors", [])):
-            content, removed = strip_no_view_blocks(content)
+            pre_strip = content
+            content, removed_blocks = strip_no_view_blocks(content)
             result = validate(content)
-            _log(f"Deterministic strip: -{removed} no-view blocks; re-validate ok={result.get('ok')}")
+            # Audit trail (K3 P0): a wrong kill must be recoverable — persist the
+            # pre-strip original and every removed block verbatim.
+            (cache_dir / f"daily_raw_{target.isoformat()}_pre_strip.txt").write_text(pre_strip, encoding="utf-8")
+            if removed_blocks:
+                audit = "\n\n".join(f"=== 被剔除块 {i + 1} ===\n{b}" for i, b in enumerate(removed_blocks))
+                (cache_dir / f"no_view_stripped_{target.isoformat()}.txt").write_text(audit, encoding="utf-8")
+            _log(
+                f"Deterministic strip: -{len(removed_blocks)} no-view blocks "
+                f"(audit: no_view_stripped_{target.isoformat()}.txt); re-validate ok={result.get('ok')}"
+            )
         if not result.get("ok"):
             (cache_dir / f"daily_raw_{target.isoformat()}.txt").write_text(content, encoding="utf-8")
             _log(f"Validation failed: {result.get('errors', [])}")

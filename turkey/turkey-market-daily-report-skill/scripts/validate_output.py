@@ -9,13 +9,24 @@ import re
 
 
 LEVEL_WORDS = ("支撑", "阻力", "均线", "压力位", "支撑位", "阻力位")
-DIRECTION_WORDS = ("突破", "跌破", "站稳", "守稳", "守住", "失守", "上看", "下看", "看涨", "看跌", "看多", "看空", "多头", "空头", "上行", "下行", "转弱", "转强", "走弱", "走强", "反弹", "回调", "上攻", "破坏", "目标价", "买入", "卖出", "增持", "减持", "低估", "高估", "订单", "利润", "增长")
+DIRECTION_WORDS = ("突破", "跌破", "破位", "回踩", "企稳", "站稳", "守稳", "守住", "失守", "上看", "下看", "看涨", "看跌", "看多", "看空", "偏多", "偏空", "多头", "空头", "上行", "下行", "转弱", "转强", "走弱", "走强", "反弹", "回调", "上攻", "破坏", "承压", "催化", "目标价", "买入", "卖出", "增持", "减持", "低估", "高估", "订单", "利润", "增长", "业绩", "并购", "要约", "分红", "回购")
 INDEX_PREFIX_RE = re.compile(r"^(?:XU\s?\d+|BIST\s?\d*|XBANK)")
+# A real LEVEL quote carries a number: "支撑 12.50". The bare word is often a
+# VERB in real commentary ("对指数形成支撑", "保费数据支撑") — replay showed
+# both false kills came from verb usage (K3 review 2026-10-12).
+LEVEL_WITH_PRICE_RE = re.compile(r"(?:支撑|阻力|压力)[位]?\s*[：:]?\s*\d|均线[^\n]{0,12}\d")
+# Fund-flow phrases whose 买入/卖出 words must not count as direction evidence
+# ("外资净买入" kept a pure listing alive in replay).
+FLOW_PHRASE_RE = re.compile(r"(?:净买入|净卖出|买入榜|卖出榜|净资金流入|净资金流出|资金净流入|资金净流出|买入居首|卖出居首)")
 
 
 def block_is_no_view(blk: str) -> bool:
     """True if a stock block must be dropped: index row, placeholder fields,
-    or levels without any direction/condition/thesis (user rule 2026-10-12)."""
+    or levels-without-direction (user rule 2026-10-12).
+
+    Direction evidence is judged on the OPINION LINES ONLY (first line is the
+    required 名称｜定位｜决策 format — its 决策 wording is format, not thesis),
+    with fund-flow phrases masked out first."""
     lines = [ln.strip() for ln in blk.splitlines() if ln.strip()]
     if not lines:
         return False
@@ -24,30 +35,38 @@ def block_is_no_view(blk: str) -> bool:
         return True
     if INDEX_PREFIX_RE.match(fields[0].upper()):
         return True
-    body = blk
-    has_level = any(w in body for w in LEVEL_WORDS)
-    has_dir = any(w in body for w in DIRECTION_WORDS) or any(
-        w in body for w in ("业绩", "订单", "并购", "要约", "分红", "回购")
-    )
+    body = "\n".join(lines[1:]) or blk
+    body = FLOW_PHRASE_RE.sub("", body)
+    has_level = bool(LEVEL_WITH_PRICE_RE.search(body))
+    has_dir = any(w in body for w in DIRECTION_WORDS)
     return has_level and not has_dir
 
 
-def strip_no_view_blocks(text: str) -> tuple[str, int]:
+def strip_no_view_blocks(text: str) -> tuple[str, list[str]]:
     """Remove no-view stock blocks from the 个股分析 section deterministically.
-    Returns (new_text, removed_count). Non-stock paragraphs (声明 etc.) stay."""
+    Returns (new_text, removed_blocks_verbatim) — the caller MUST persist the
+    removed blocks for audit: a wrong kill is otherwise unrecoverable (K3 P0).
+
+    Also drops index/garbage blocks whose first line carries no ｜ (the
+    looks_stock blind spot K3 replayed)."""
     import re as _re
     m = _re.search(r"(?m)^(## 二、个股分析[^\n]*)\n(.*?)(?=^## |\Z)", text, _re.S | _re.M)
     if not m:
-        return text, 0
+        return text, []
     heading, body = m.group(1), m.group(2)
-    kept, removed = [], 0
+    kept: list[str] = []
+    removed: list[str] = []
     for blk in _re.split(r"\n\s*\n", body):
         s = blk.strip()
         if not s:
             continue
-        looks_stock = "｜" in s.splitlines()[0] and not s.startswith(("*", "-", "声明"))
+        first = s.splitlines()[0]
+        is_meta = s.startswith(("*", "-", "声明"))
+        looks_stock = ("｜" in first and not is_meta) or (
+            INDEX_PREFIX_RE.match(first.split()[0].upper()) if first.split() else False
+        )
         if looks_stock and block_is_no_view(s):
-            removed += 1
+            removed.append(s)
             continue
         kept.append(s)
     new_body = "\n\n".join(kept)
@@ -152,11 +171,12 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
         has_judgment = any(w in blk for w in judgment_words)
         if has_flow and not has_judgment:
             flow_only += 1
-        # Pure level-quoting technical sweep = no view (user rule 2026-10-12):
-        # levels present but no direction/condition/thesis anywhere in the block.
-        level_words = ("支撑", "阻力", "均线", "压力位", "支撑位", "阻力位")
-        direction_words = ("突破", "跌破", "站稳", "守稳", "守住", "失守", "上看", "下看", "看涨", "看跌", "看多", "看空", "多头", "空头", "上行", "下行", "转弱", "转强", "走弱", "走强", "反弹", "回调", "上攻", "破坏", "目标价", "买入", "卖出", "增持", "减持", "低估", "高估", "订单", "利润", "增长")
-        if any(w in blk for w in level_words) and not any(w in blk for w in direction_words):
+        # Pure level-quoting technical sweep = no view (user rule 2026-10-12).
+        # Delegates to block_is_no_view — the ONE shared predicate. A separate
+        # inline word list here drifted from the stripper's and produced a
+        # guaranteed-fail loop (validate errors, strip removes nothing,
+        # re-validate errors again — K3 P0 replay).
+        if block_is_no_view(blk):
             pure_levels += 1
             continue
     if bad_heads:
