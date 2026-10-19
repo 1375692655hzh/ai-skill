@@ -81,8 +81,10 @@ def call_llm(
         "max_tokens": max_tokens,
     }
 
-    # Disable thinking for MiniMax models (they output <think> blocks that consume tokens)
-    if provider == "minimax":
+    # Disable thinking for MiniMax models (they output <think> blocks that consume tokens).
+    # M3.1 系（如 MiniMax-M3.1-Flash-Preview）强制自适应思考，发送 disabled 会被 API
+    # 以 error 2013 拒绝；其思考内容走独立 reasoning_content 字段，不会污染正文。
+    if provider == "minimax" and "M3.1" not in model:
         payload["thinking"] = {"type": "disabled"}
 
     headers = {

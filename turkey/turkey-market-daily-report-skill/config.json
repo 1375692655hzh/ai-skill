@@ -5,22 +5,12 @@
   "target_date": "auto",
   "inputs": {
     "roots": {
-      "info_daily": "../turkey-info-daily-report-skill/output",
       "x_influencer": "../turkey-x-influencer-report-skill/output",
-      "aa_morning": "../turkey-aa-morning-briefing-skill/output",
-      "close_report": "../turkey-close-report-skill/output",
-      "paraborsa": "../turkey-paraborsa-all-report-skill/output",
-      "morning_briefing": "../turkey-morning-report-skill/output",
-      "info_technical": "../turkey-info-technical-report-skill/output"
+      "paraborsa": "../turkey-paraborsa-all-report-skill/output"
     },
     "patterns": {
-      "info_daily": "{date}_info_daily_report_zh.md",
       "x_influencer": "{date}_x_influencer_full_zh.md",
-      "aa_morning": "{date}_aa_morning_briefing_zh.md",
-      "close_report": "{date}_close_report_zh.md",
-      "paraborsa": "{date}_paraborsa_all_report_zh.md",
-      "morning_briefing": "{date}_daily_briefing_zh.md",
-      "info_technical": "{date}_info_technical_report_zh.md"
+      "paraborsa": "{date}_paraborsa_all_report_zh.md"
     },
     "max_chars_per_input": 60000,
     "x_max_chars": 150000
@@ -37,5 +27,11 @@
     "font": "Noto Sans CJK SC",
     "filename": "turkey_daily_{yyyymmdd}.docx"
   },
-  "holidays": []
+  "holidays": [
+    "2027-03-09",
+    "2027-03-10",
+    "2027-03-11",
+    "2027-05-17",
+    "2027-05-18"
+  ]
 }

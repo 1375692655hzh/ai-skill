@@ -189,7 +189,7 @@ def build_morning_bht_fact_sheet(
     )
 
     # index snapshot for 核心观点 only (not a dedicated section)
-    lines.append("【昨日收盘指数摘要｜仅供核心观点引用数字】")
+    lines.append("【前一交易日收盘指数摘要｜仅供核心观点引用数字】")
     bits: list[str] = []
     # Direction-agnostic BIST100 close parser. BHT phrasings:
     #   yüzde -1.26 değer kaybederek 13.515.54 puanla ...

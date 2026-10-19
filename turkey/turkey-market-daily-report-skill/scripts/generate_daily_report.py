@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Turkey market daily hotspots report — aggregate upstream skill outputs
-(same-day Info/X/AA + previous-trading-day close/Paraborsa) into a two-chapter
+(same-day X influencers + previous-trading-day Paraborsa) into a two-chapter
 Chinese daily report, validated and rendered to .docx."""
 from __future__ import annotations
 
@@ -68,13 +68,9 @@ def main() -> int:
     _log("Input bundle:\n" + _input_report(bundle))
 
     missing = bundle["missing_core"]
-    has_anchor = (not bundle["same_day"].get("info_daily")) is False or (
-        not bundle["same_day"].get("morning_briefing")
-    ) is False
-    if "x_influencer" in missing or not has_anchor:
+    if "x_influencer" in missing:
         _log(
             f"核心输入不足（missing={missing}）。规范要求：X大V全文必须有；"
-            "Info日报与早报至少其一（同事锚定顺序 info_daily→morning_briefing）。"
             "不生成虚假热点/个股表，请先跑对应上游 skill。"
         )
         return 2
@@ -160,8 +156,12 @@ def main() -> int:
             )
         if not result.get("ok"):
             (cache_dir / f"daily_raw_{target.isoformat()}.txt").write_text(content, encoding="utf-8")
-            _log(f"Validation failed: {result.get('errors', [])}")
-            return 1
+            compact_len = len("".join(content.split()))
+            if compact_len < 300:
+                _log(f"Output too short ({compact_len} chars) — LLM 异常输出，按失败重试: {result.get('errors', [])}")
+                return 1
+            # 交付优先（用户铁律 2026-10-19）：格式/数据缺口只诊断不拦截，照常落盘推送
+            _log("Validation issues (non-blocking, delivered anyway): " + str(result.get("errors", [])))
     if result.get("warnings"):
         _log(f"Validation warnings: {result['warnings']}")
     _log(f"hotspots={result.get('hotspots')} stock_rows={result.get('stock_rows')}")

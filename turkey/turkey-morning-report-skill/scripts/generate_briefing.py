@@ -26,11 +26,65 @@ from source_header import prepend_header
 from fetch_aa_top_stories import fetch_aa_top_stories
 from news_fact_sheet import build_international_news_card
 from validate_brief_output import validate_brief
-from validate_output import validate
+from validate_output import auto_repair_tr_leaks, validate
 
 
 def load_config(config_path: Path) -> dict:
     return json.loads(config_path.read_text(encoding="utf-8"))
+
+
+def _prev_day_label(today_date: str, target_date: str) -> str | None:
+    """前一交易日不是日历昨天（周一/节假日后首个交易日）时，返回正确指代词
+    （跨 ISO 周给「上周五」式，同周给「周一」式）。返回 None 表示「昨日」正确。
+    """
+    try:
+        today = date.fromisoformat(today_date)
+        prev = date.fromisoformat(target_date)
+    except ValueError:
+        return None
+    if (today - prev).days <= 1:
+        return None
+    wd = "一二三四五六日"[prev.weekday()]
+    prev_week = (prev.isocalendar()[0], prev.isocalendar()[1])
+    today_week = (today.isocalendar()[0], today.isocalendar()[1])
+    return f"上周{wd}" if prev_week < today_week else f"周{wd}"
+
+
+def fix_relative_day_terms(text: str, today_date: str, target_date: str) -> tuple[str, int]:
+    """交付前把跨日口径的「昨日/昨天」替换为正确指代（如周一引用周五收盘 → 上周五）。"""
+    label = _prev_day_label(today_date, target_date)
+    if not label:
+        return text, 0
+    n = text.count("昨日") + text.count("昨天")
+    if not n:
+        return text, 0
+    return text.replace("昨日", label).replace("昨天", label), n
+
+
+def build_fallback_briefing(
+    today_date: str, closing_material: str, live: dict, news_text: str
+) -> str:
+    """LLM 全失败的机械降级版：直接汇总已抓事实，保证当日有稿可推。"""
+    lines = [
+        f"【土耳其股市早评 — {today_date}】",
+        "（今日生成链路异常，本篇为自动降级素材版：以下直接汇总已抓取数据要点）",
+    ]
+    fact_cn = (live.get("fact_cn") or "").strip()
+    if fact_cn:
+        lines.append(fact_cn)
+    if closing_material:
+        cleaned = [
+            ln.strip()
+            for ln in closing_material.strip().splitlines()
+            if ln.strip() and not ln.strip().startswith(("===", "---"))
+        ]
+        lines.extend(cleaned[:30])
+    if news_text and news_text.strip() and news_text.strip() != "（无补充新闻数据）":
+        news_lines = [ln.strip() for ln in news_text.strip().splitlines() if ln.strip()]
+        lines.append("国际新闻要点：")
+        lines.extend(news_lines[:25])
+    lines.append("风险提示：本篇为降级素材版，内容未经整理校对，不构成投资建议。")
+    return "\n".join(lines) + "\n"
 
 
 def resolve_brief_template(skill_dir: Path, config: dict) -> Path | None:
@@ -206,20 +260,44 @@ def main() -> int:
         return 0
 
     llm_cfg = config["llm"]
-    output, validation = generate_with_validation(prompt, llm_cfg, validate)
-    if output is None or not validation["ok"]:
-        print(f"Validation failed: {validation.get('errors', [])}", file=sys.stderr)
-        if output:
-            debug_file = cache_dir / f"raw_output_{today_date}.txt"
-            debug_file.write_text(output, encoding="utf-8")
-            print(f"Raw output saved to: {debug_file}", file=sys.stderr)
-        return 1
+
+    def _validate_repaired(text: str) -> dict:
+        # 送检前先做土语泄漏修复：已知词确定性替换，不再为单个词烧重试
+        return validate(auto_repair_tr_leaks(text)[0])
+
+    output, validation = generate_with_validation(prompt, llm_cfg, _validate_repaired)
+
+    if output:
+        output, repaired = auto_repair_tr_leaks(output)
+        if repaired:
+            print(f"Auto-repaired TR leaks: {', '.join(repaired)}", file=sys.stderr)
+        validation = validate(output)
+
+    if not output or not output.strip():
+        # 交付优先：LLM 全失败也不能断供，用已抓素材拼装降级版
+        output = build_fallback_briefing(today_date, closing_material, live, news_text)
+        validation = validate(output)
+        print("LLM output unavailable — delivered mechanical fallback version", file=sys.stderr)
+
+    if not validation["ok"]:
+        # 校验只诊断不拦截：任何格式/数据缺口都不允许阻断交付
+        debug_file = cache_dir / f"raw_output_{today_date}.txt"
+        debug_file.write_text(output, encoding="utf-8")
+        print(
+            f"Validation issues (non-blocking, delivered anyway): {validation.get('errors', [])}",
+            file=sys.stderr,
+        )
 
     if validation.get("warnings"):
         print(f"Validation warnings: {validation['warnings']}", file=sys.stderr)
 
     # 只要换行、不要空行
     output = re.sub(r"\n{2,}", "\n", output.replace("\r\n", "\n")).strip() + "\n"
+
+    # 周一/节假日后：「昨日」指代错误（前一交易日是上周五等），确定性替换
+    output, n_dayfix = fix_relative_day_terms(output, today_date, target_date)
+    if n_dayfix:
+        print(f"Day-term fix: replaced {n_dayfix} 昨日/昨天 -> {_prev_day_label(today_date, target_date)}", file=sys.stderr)
 
     # 数据来源元数据：每个抓取源的 URL + 状态
     # fetch_closing_review returns a flat payload (ok/url/text/article_id),
@@ -301,6 +379,7 @@ def main() -> int:
             ),
         )
         if brief_output and brief_validation.get("ok"):
+            brief_output, _ = fix_relative_day_terms(brief_output, today_date, target_date)
             brief_file.write_text(brief_output, encoding="utf-8")
             print(f"Brief briefing written to: {brief_file}")
             if brief_validation.get("warnings"):

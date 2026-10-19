@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -37,7 +38,8 @@ def load_env_file(env_path: Path) -> dict[str, str]:
     env: dict[str, str] = {}
     if not env_path or not env_path.is_file():
         return env
-    for line in env_path.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig：带 BOM 的 .env 也能正确解析（与无 BOM 文件行为一致）
+    for line in env_path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -104,6 +106,17 @@ def newest_file(directory: Path, pattern_glob: str) -> Path | None:
     return files[0] if files else None
 
 
+def _match_dated_file(out_dir: Path, pattern: str, date: str) -> Path | None:
+    """按 pattern({date} 已替换) 定位文件。pattern 含 glob 通配符(*?[)时按
+    glob 取最新匹配（如 土耳其快讯_{date}_中文简报*.md 的时间后缀），否则精确路径。
+    始终要求文件名嵌入指定日期，绝不跨日期回退。"""
+    target = pattern.format(date=date)
+    if any(ch in target for ch in "*?["):
+        return newest_file(out_dir, target)
+    p = out_dir / target
+    return p if p.is_file() else None
+
+
 def now_iso() -> str:
     return dt.datetime.now().isoformat(timespec="seconds")
 
@@ -150,11 +163,9 @@ def locate_outputs(task_cfg: dict, today_tr: str | None,
     full_pattern = task_cfg.get("full_pattern", "")
     if today_tr:
         if brief_pattern:
-            b = out_dir / brief_pattern.format(date=today_tr)
-            brief = b if b.is_file() else None
+            brief = _match_dated_file(out_dir, brief_pattern, today_tr)
         if full_pattern:
-            f = out_dir / full_pattern.format(date=today_tr)
-            full = f if f.is_file() else None
+            full = _match_dated_file(out_dir, full_pattern, today_tr)
     # 显式允许时才回退到最新文件（fallback glob 可通过 brief_glob / full_glob 配置）
     if task_cfg.get("allow_fallback_to_latest"):
         if not brief and brief_pattern:
@@ -218,8 +229,7 @@ def _today_dated_file(task_cfg: dict, today_tr: str | None, pattern_key: str) ->
         return None
     skill_dir = Path(task_cfg.get("run_cwd") or task_cfg.get("skill_dir"))
     out_dir = skill_dir / task_cfg.get("output_dir", "output")
-    p = out_dir / pattern.format(date=today_tr)
-    return p if p.is_file() else None
+    return _match_dated_file(out_dir, pattern, today_tr)
 
 
 def push_content(cfg: dict, task_cfg: dict, group_names: list[str],
@@ -406,6 +416,29 @@ def _extract_close_report_fingerprint(task_cfg: dict, today_tr: str | None) -> d
             fp["bht_ok"] = data.get("ok", False)
         except Exception:
             pass
+    # 2026-10-19 事故修正：前一晚未发文时缓存 article_id=None，此后 BHT 补发
+    # 文章，纯读缓存的指纹预检永远判"素材无变化"，00:10 补跑轮被去重吞掉、
+    # 正式版永不接棒。缓存无 id 时改用探针实时重探列表页（_scan_list_page
+    # 内置双抓合并防 CDN 漏卡）；缓存已有 id 则免探保持快速路径。
+    if fp.get("bht_article_id") is None:
+        probe = skill_dir / "scripts" / "probe_bht_close.py"
+        if probe.is_file():
+            try:
+                proc = subprocess.run(
+                    [sys.executable, str(probe), "--date", str(today_tr)],
+                    cwd=str(skill_dir), capture_output=True, text=True,
+                    encoding="utf-8", timeout=120,
+                )
+                line = next((l for l in reversed((proc.stdout or "").splitlines())
+                             if l.strip().startswith("{")), "")
+                if line:
+                    live = json.loads(line)
+                    if live.get("article_id"):
+                        fp["bht_article_id"] = live["article_id"]
+                        fp["bht_url"] = live.get("url")
+                        fp["bht_ok"] = True
+            except Exception:
+                pass  # 探针失败退回缓存口径，去重行为不变
 
     par_cache = cache_dir / f"paraborsa_{today_tr}.json"
     if par_cache.is_file():
@@ -639,6 +672,213 @@ def execute_task(cfg: dict, task_name: str, logger: logging.Logger) -> dict:
     return entry
 
 
+# ---------------------------------------------------------------------------
+# 腾讯文档上传（通用分支，仅对配置 "tdoc_upload": true 的任务生效）
+# 完整报告 -> 腾讯智能文档（mcporter 调 tencent-docs）-> 群链接文本推送。
+# 上传机制与 tr_daily.py 一致（Windows 下 mcporter.CMD 改走 node + cli.js）。
+# ---------------------------------------------------------------------------
+
+_TDOC_CHUNK_LIMIT = 12000  # 单块字符上限，超出分块后续写（与 tr_daily chunk_limit 一致）
+
+
+def _mcporter_invocation(exe: str, service: str, tool: str, payload: str) -> list[str]:
+    """构造 mcporter 调用命令。Windows 下 shutil.which 命中 .cmd/.bat 批处理
+    包装时，经 cmd.exe 传多行/含特殊字符的 JSON --args 会被截断或破坏（10-13
+    踩坑：创建"成功"但 file_id/url 为空）。此时改用 node + mcporter 包内
+    cli.js 直调，与经 npm shim 等价但不经批处理。找不到 node/cli.js 时回退
+    原行为（调用方记日志）。"""
+    argv_tail = ["call", service, tool, "--args", payload]
+    if os.name == "nt" and exe.lower().endswith((".cmd", ".bat")):
+        cli_js = Path(os.path.dirname(os.path.abspath(exe))) / "node_modules" / "mcporter" / "dist" / "cli.js"
+        node = shutil.which("node")
+        if node and cli_js.is_file():
+            return [node, str(cli_js)] + argv_tail
+    return [exe] + argv_tail
+
+
+def _tdoc_mcporter_call(task_cfg: dict, tool: str, args: dict,
+                        logger: logging.Logger) -> dict:
+    """直连 mcporter（不经 shell），返回解析出的 JSON；失败返回 {"error": ...}。"""
+    exe = task_cfg.get("mcporter_path") or shutil.which("mcporter")
+    if not exe:
+        return {"error": "找不到 mcporter：请安装 mcporter 或在任务配置设置 mcporter_path"}
+    service = task_cfg.get("tencent_service", "tencent-docs")
+    payload = json.dumps(args, ensure_ascii=False)
+    cmd = _mcporter_invocation(exe, service, tool, payload)
+    logger.info(f"mcporter: {tool} ({len(payload)}B)")
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, errors="replace")
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"mcporter 调用异常: {exc}"}
+    out = (r.stdout or r.stderr or "").strip()
+    try:
+        return json.loads(re.search(r"\{.*\}", out, re.S).group(0))
+    except Exception:  # noqa: BLE001
+        return {"error": (out or f"rc={r.returncode} 无输出")[:300]}
+
+
+def _tdoc_chunk_lines(text: str, limit: int) -> list[str]:
+    """按行累积分块（与 tr_daily.chunk_lines 同策略），单块约不超过 limit 字符。"""
+    chunks, cur, size = [], [], 0
+    for ln in text.splitlines():
+        cur.append(ln)
+        size += len(ln) + 1
+        if size >= limit:
+            chunks.append("\n".join(cur))
+            cur, size = [], 0
+    if cur:
+        chunks.append("\n".join(cur))
+    return chunks or [""]
+
+
+def _tdoc_policy_of(resp: dict) -> int:
+    """get_privilege 响应中的 policy 转 int；缺失/非法返回 -1。"""
+    try:
+        return int(resp.get("policy"))
+    except (TypeError, ValueError):
+        return -1
+
+
+def _tdoc_ensure_upload(task_cfg: dict, task_name: str, today_tr: str | None,
+                        full_file: Path, logger: logging.Logger) -> tuple[str | None, str | None, str, str]:
+    """上传完整报告为腾讯智能文档，返回 (file_id, url, err, warn)。
+
+    同日同文件不得重复建文档：结果记录在 output/<date>_*.json（file_id/url），
+    已存在则直接复用其 url（不调用 mcporter）。任一步失败返回 err 描述，
+    不写状态文件、不推链接（由调用方 push_alarm，绝不静默）。
+    warn 为"所有人可读"回读未确认的告警文本：不阻断链接推送，由调用方
+    push_alarm 并记入状态文件 privilege_verified=false。"""
+    skill_dir = Path(task_cfg.get("run_cwd") or task_cfg.get("skill_dir"))
+    out_dir = skill_dir / task_cfg.get("output_dir", "output")
+    pattern = task_cfg.get("tdoc_state_pattern", "{date}_tdoc.json")
+    state_path = out_dir / pattern.format(date=today_tr) if today_tr else None
+    if state_path and state_path.is_file():
+        try:
+            st = json.loads(state_path.read_text(encoding="utf-8"))
+            fid, url = str(st.get("file_id", "")), str(st.get("url", ""))
+            if fid and url:
+                logger.info(f"{task_name}: 复用已上传腾讯文档 {state_path.name} -> {url}")
+                return fid, url, "", ""
+            err = f"状态文件 {state_path} 缺少 file_id/url（file_id={fid or '空'}, url={url or '空'}），不重复建文档，请人工检查"
+            logger.error(err)
+            return None, None, err, ""
+        except Exception as exc:  # noqa: BLE001
+            err = f"读取状态文件 {state_path} 失败: {exc}；不重复建文档，请人工检查"
+            logger.error(err)
+            return None, None, err, ""
+    if not today_tr:
+        return None, None, "today_tr 未知，无法按日期命名/去重腾讯文档", ""
+
+    title_prefix = task_cfg.get("tdoc_title_prefix") or task_cfg.get("title_prefix", task_name)
+    doc_title = f"{title_prefix} · {today_tr}"
+    limit = int(task_cfg.get("tdoc_chunk_limit", _TDOC_CHUNK_LIMIT))
+    try:
+        content = full_file.read_text(encoding="utf-8").strip()
+    except Exception as exc:  # noqa: BLE001
+        return None, None, f"读取完整报告失败: {exc}", ""
+    chunks = _tdoc_chunk_lines(content, limit)
+
+    d = _tdoc_mcporter_call(task_cfg, "create_smartcanvas_by_mdx",
+                            {"title": doc_title, "mdx": chunks[0]}, logger)
+    fid, url = str(d.get("file_id", "")), str(d.get("url", ""))
+    if not fid:
+        return None, None, f"腾讯文档创建失败（无 file_id）: {str(d)[:300]}", ""
+    logger.info(f"{task_name}: 腾讯文档已创建 {doc_title} -> {url or d}")
+    for i, ch in enumerate(chunks[1:], 2):
+        d2 = _tdoc_mcporter_call(task_cfg, "smartcanvas.edit",
+                                 {"file_id": fid, "action": "INSERT_AFTER", "content": ch}, logger)
+        if d2.get("error"):
+            return None, None, f"追加第 {i}/{len(chunks)} 块失败: {str(d2)[:200]}（文档 {fid} 内容不完整，未写状态文件）", ""
+    # 所有人可读（policy=2），否则群里打不开链接。
+    # 2026-10-13 对照腾讯文档开放平台官方 API 核验参数：MCP 工具 manage.set_privilege
+    # 的 schema 为 policy:number（2-所有人可读，3-所有人可编辑），等价 REST 为
+    # PATCH /openapi/drive/v2/files/{fileID}/permission (policy=publicRead，官方文档
+    # "设置文档权限")。传字符串 "2" 会被服务端 400001 拒绝（已实测），必须传数值。
+    dp = _tdoc_mcporter_call(task_cfg, "manage.set_privilege",
+                             {"file_id": fid, "policy": 2}, logger)
+    if dp.get("error"):
+        return None, None, f"设置文档所有人可读失败: {str(dp)[:200]}（链接可能仅自己可见，未推送）", ""
+    logger.info(f"{task_name}: manage.set_privilege 已受理（policy=2，trace_id={dp.get('trace_id', '')}）")
+    # 设置后回读校验。注意（2026-10-13 实测）：manage.get_privilege 对本账号下所有
+    # 文档——包括已匿名可访问的公开智能文档——恒返回 policy=0（私密文档同样返回 0，
+    # 完全不 discriminating），官方文档亦声明该接口仅支持 0/1/2/3 四种场景、其余
+    # 场景可能误报。故 policy!=2 时重试一次设置+回读（排除最终一致延迟）；仍 !=2
+    # 记失败告警（调用方 push_alarm + 状态文件 privilege_verified=false），但不
+    # 阻断链接推送——回读接口已被证明不可信时，硬失败会让每日任务必然失败。
+    dg = _tdoc_mcporter_call(task_cfg, "manage.get_privilege", {"file_id": fid}, logger)
+    if _tdoc_policy_of(dg) != 2:
+        logger.warning(f"{task_name}: get_privilege 回读 policy={dg.get('policy')}（预期 2），"
+                       "5 秒后重试设置并回读")
+        time.sleep(5)
+        _tdoc_mcporter_call(task_cfg, "manage.set_privilege",
+                            {"file_id": fid, "policy": 2}, logger)
+        dg = _tdoc_mcporter_call(task_cfg, "manage.get_privilege", {"file_id": fid}, logger)
+    warn = ""
+    if _tdoc_policy_of(dg) != 2:
+        warn = (f"所有人可读回读校验未通过：get_privilege 返回 policy={dg.get('policy')}"
+                f"（预期 2，已重试一次）。该接口对智能文档已知误报（公开文档也返回 0），"
+                "链接仍推送，请人工打开确认。")
+        logger.warning(f"{task_name}: {warn}")
+    if state_path:
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(json.dumps({"file_id": fid, "url": url,
+                                              "privilege_verified": not warn},
+                                             ensure_ascii=False),
+                                  encoding="utf-8")
+            logger.info(f"{task_name}: 腾讯文档状态已记录 {state_path}")
+        except Exception as exc:  # noqa: BLE001
+            # 状态未落盘：下次运行会重复建文档，必须告警让人工补录
+            return fid, url, f"上传成功但状态文件写入失败: {exc}（请人工补录 {state_path}，避免重复建文档）", warn
+    return fid, url, "", warn
+
+
+def _do_push_tdoc_link(cfg: dict, task_cfg: dict, task_name: str, today_tr: str | None,
+                       logger: logging.Logger, started: float, log_dir: Path,
+                       gen_status: str, title_prefix: str) -> dict:
+    """腾讯文档链接推送分支：读技能 tr_data/build_state.json 中【当日】url，
+    推送【标题】<日期>\\n腾讯文档：<url> 文本，不发送 .md 文件。
+    build_state 无当日 url 时不推送任何内容，按推送失败记并告警（绝不推空链/旧链）。"""
+    push_groups = task_cfg.get("push_groups", [])
+    skill_dir = Path(task_cfg.get("run_cwd") or task_cfg.get("skill_dir"))
+    state_rel = task_cfg.get("tdoc_state_file", "tr_data/build_state.json")
+    state_path = skill_dir / state_rel
+    today = dt.datetime.now().date().isoformat()
+    url, prod_date = "", ""
+    try:
+        st = json.loads(state_path.read_text(encoding="utf-8"))
+        prod_date = str(st.get("prod_date", ""))
+        url = str(st.get("url", ""))
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"{task_name}: 读取腾讯文档状态失败 {state_path}: {exc}")
+    text_ok = True
+    if not url or prod_date != today:
+        text_ok = False
+        logger.error(f"{task_name}: build_state 无当日({today})腾讯文档链接 "
+                     f"(prod_date={prod_date or '空'}, url={'有' if url else '空'})，不推送链接")
+        push_alarm(cfg, logger, f"⚠️ {task_name} 文档链接缺失",
+                   f"build_state({state_path}) 无当日 url，未推送，请人工检查上云步骤")
+    else:
+        msg = f"【{title_prefix}】{prod_date}\n腾讯文档：{url}"
+        text_ok = push_content(cfg, task_cfg, push_groups, msg, logger)
+        if not text_ok:
+            push_alarm(cfg, logger, f"⚠️ {task_name} 链接推送失败", f"prod_date={prod_date}")
+    if gen_status == "skipped_exists":
+        status = "ok" if text_ok else "push_failed"
+    elif gen_status == "ok_fallback":
+        status = "ok_fallback" if text_ok else "push_failed"
+    else:
+        status = "ok" if text_ok else "push_failed"
+    entry = {"task": task_name, "time": now_iso(),
+             "status": status,
+             "today_tr": today_tr,
+             "tdoc_url": url if text_ok else None,
+             "text_push": text_ok, "file_push": None,
+             "elapsed_sec": round(time.time() - started, 1)}
+    write_run_log(log_dir, entry)
+    return entry
+
+
 def _do_push(cfg: dict, task_cfg: dict, task_name: str, today_tr: str | None,
              brief_file: Path | None, full_file: Path | None,
              logger: logging.Logger, started: float, log_dir: Path,
@@ -648,6 +888,12 @@ def _do_push(cfg: dict, task_cfg: dict, task_name: str, today_tr: str | None,
     brief_optional = task_cfg.get("brief_optional", False)
     # 推送标题前缀
     title_prefix = task_cfg.get("title_prefix", task_name)
+
+    # 腾讯文档链接推送（仅对显式配置 push_tencent_doc_link=true 的任务生效，如 zh_flash）：
+    # 不推送 .md 文件，改推技能 build_state.json 里【当日】prod_date 对应的文档链接。
+    if task_cfg.get("push_tencent_doc_link"):
+        return _do_push_tdoc_link(cfg, task_cfg, task_name, today_tr, logger,
+                                  started, log_dir, gen_status, title_prefix)
 
     text_ok = True
     if brief_file is None and not brief_optional and full_file is not None:
@@ -661,14 +907,47 @@ def _do_push(cfg: dict, task_cfg: dict, task_name: str, today_tr: str | None,
         if not text_ok:
             push_alarm(cfg, logger, f"⚠️ {task_name} 文本推送失败", f"文件: {brief_file.name}")
     elif brief_optional and full_file:
-        # 无简报版：发通知文本（标题 + 报告已生成提示）
-        notify = f"【{title_prefix}】{today_tr or ''} 报告已生成，完整内容见文件。"
+        # 无简报版：发通知文本（标题 + 报告已生成提示）。
+        # tdoc_upload 任务不再发 .md 文件，通知文案指向腾讯文档链接。
+        where = "完整内容见下方腾讯文档链接。" if task_cfg.get("tdoc_upload") else "完整内容见文件。"
+        notify = f"【{title_prefix}】{today_tr or ''} 报告已生成，{where}"
         text_ok = push_content(cfg, task_cfg, push_groups, notify, logger)
         if not text_ok:
             push_alarm(cfg, logger, f"⚠️ {task_name} 通知推送失败", "通知文本发送失败")
 
     file_ok = True
-    if task_cfg.get("send_full_as_file", True) and full_file:
+    tdoc_url: str | None = None
+    if task_cfg.get("tdoc_upload"):
+        # 通用腾讯文档分支（仅 tdoc_upload=true 的任务，如 aa_morning_briefing）：
+        # 完整报告上传为腾讯智能文档（同日状态文件去重，绝不重复建文档），
+        # 推送 "【标题】日期\n腾讯文档：<url>" 链接文本，不发送 .md 文件。
+        # 与 zh_flash 的 push_tencent_doc_link 分支互不影响（该分支在前面已 return）。
+        # 上传/权限/状态失败必须告警，不能静默。
+        if full_file:
+            fid, url, err, warn = _tdoc_ensure_upload(task_cfg, task_name, today_tr, full_file, logger)
+            if err:
+                logger.error(f"{task_name}: 腾讯文档上传失败: {err}")
+                push_alarm(cfg, logger, f"⚠️ {task_name} 腾讯文档上传失败", err)
+                file_ok = False
+            else:
+                if warn:
+                    # 回读接口 get_privilege 对智能文档恒返回 0（公开文档同样返回 0，
+                    # 2026-10-13 实测无区分度），此 warn 每日必触发且不可自愈；
+                    # set_privilege 已受理即视为生效，链接经人工 10-13~10-19 多日
+                    # 验证可正常打开。2026-10-19 起降级为日志，不再每日推送人工
+                    # 确认告警；上传/设权限/状态文件/链接推送的真实失败仍走告警。
+                    logger.info(f"{task_name}: {warn}")
+                tdoc_url = url
+                msg = f"【{title_prefix}】{today_tr}\n腾讯文档：{url}"
+                file_ok = push_content(cfg, task_cfg, push_groups, msg, logger)
+                if not file_ok:
+                    push_alarm(cfg, logger, f"⚠️ {task_name} 文档链接推送失败",
+                               f"file_id={fid}, url={url}")
+        else:
+            # 走到 _do_push 必有 full_file（调用点均保证），防御性告警
+            file_ok = False
+            push_alarm(cfg, logger, f"⚠️ {task_name} 腾讯文档上传失败", "完整报告文件缺失，无法上传")
+    elif task_cfg.get("send_full_as_file", True) and full_file:
         file_ok = push_file(cfg, task_cfg, push_groups, full_file, logger)
         if not file_ok:
             push_alarm(cfg, logger, f"⚠️ {task_name} 文件推送失败", f"文件: {full_file.name}")
@@ -691,6 +970,8 @@ def _do_push(cfg: dict, task_cfg: dict, task_name: str, today_tr: str | None,
              "full_file": str(full_file) if full_file else None,
              "text_push": text_ok, "file_push": file_ok,
              "elapsed_sec": round(time.time() - started, 1)}
+    if task_cfg.get("tdoc_upload"):
+        entry["tdoc_url"] = tdoc_url
     write_run_log(log_dir, entry)
     return entry
 

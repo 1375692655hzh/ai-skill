@@ -64,6 +64,50 @@ FACT_FLUFF_PATTERNS = [
 # Required concrete tickers in 关键个股 — at least N uppercase codes (length>=4)
 MIN_TICKERS_IN_STOCKS = 3
 
+# BHT 事实卡里的原始土耳其语板块/行情词，LLM 偶尔原样带进正文（实测 inşaat
+# 连续两日触发硬校验失败、整篇扣发）。交付优先：送检与落盘前先做确定性替换，
+# 一个未翻译的词不允许阻断出刊。
+TR_LEAK_REPLACEMENTS = {
+    "inşaat": "建筑",
+    "insaat": "建筑",
+    "bankacılık": "银行",
+    "turizm": "旅游",
+    "teknoloji": "科技",
+    "ulaştırma": "运输",
+    "enerji": "能源",
+    "finans": "金融",
+    "çelik": "钢铁",
+    "otomotiv": "汽车",
+    "perakende": "零售",
+    "telekomünikasyon": "电信",
+    "kimya": "化工",
+    "gıda": "食品",
+    "tekstil": "纺织",
+    "ormancılık": "林业",
+    "madencilik": "矿业",
+    "metal": "金属",
+    "yükselen": "上涨",
+    "düşen": "下跌",
+}
+
+
+def auto_repair_tr_leaks(text: str) -> tuple[str, list[str]]:
+    """Replace known raw Turkish sector words leaked from BHT fact cards.
+
+    Returns (repaired_text, ["inşaat→建筑", ...]). 小写敏感匹配，大写股票代码
+    （如 METAL 类代码）不会被误替换。
+    """
+    repaired: list[str] = []
+    out = text
+    for tr, zh in TR_LEAK_REPLACEMENTS.items():
+        pat = re.compile(
+            rf"(?<![A-Za-z0-9ÇĞİÖŞÜçğıöşü]){re.escape(tr)}(?![A-Za-z0-9ÇĞİÖŞÜçğıöşü])"
+        )
+        if pat.search(out):
+            out = pat.sub(zh, out)
+            repaired.append(f"{tr}→{zh}")
+    return out, repaired
+
 
 def _extract_section(text: str, title: str) -> str:
     pat = rf"【{re.escape(title)}】\s*(.*?)(?=\n【|\n风险提示|$)"

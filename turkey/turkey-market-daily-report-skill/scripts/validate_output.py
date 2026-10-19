@@ -146,6 +146,12 @@ def validate(text: str, *, min_hotspots: int = 4, max_hotspots: int = 9) -> dict
         # "不适用"-style placeholder fields mark meta/junk blocks (observed:
         # a broker bulk-sweep residue head "KREDİ KARTI DEĞİL｜不适用｜不适用").
         if len(fields) != 3 or not all(fields) or any(f in ("不适用", "无", "N/A") for f in fields):
+            # 整段无任何股票代码（无 [A-Z]{3,} token）的说明文字——典型如
+            # 「窗口内大V未给出达标个股判断」占位——不是个股块，降为警告放行。
+            # 个股节空缺本身是校验器明示允许的状态（stock_rows==0 仅 warning）。
+            if not re.search(r"[A-Z]{3,}", blk):
+                warnings.append(f"个股节含说明性段落（非个股块，放行）: {first[:40]}")
+                continue
             bad_heads += 1
             continue
         if len(lines) < 2:
