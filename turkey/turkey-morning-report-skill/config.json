@@ -66,7 +66,13 @@
     "temperature": 0.4,
     "max_tokens": 8000
   },
-  "holidays": [],
+  "holidays": [
+    "2027-03-09",
+    "2027-03-10",
+    "2027-03-11",
+    "2027-05-17",
+    "2027-05-18"
+  ],
   "brief": {
     "enabled": true,
     "template_path": "templates/morning_briefing_brief_template.txt",

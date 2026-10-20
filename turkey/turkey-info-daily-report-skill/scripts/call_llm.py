@@ -74,7 +74,7 @@ def call_llm(
         "max_tokens": max_tokens,
     }
 
-    if provider == "minimax":
+    if provider == "minimax" and "M3.1" not in model:
         payload["thinking"] = {"type": "disabled"}
 
     headers = {

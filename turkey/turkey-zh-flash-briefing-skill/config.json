@@ -1,5 +1,5 @@
 {
-  "station_base": "http://192.168.110.214:8787/v1/items",
+  "station_base": "https://data.haiwai.ltd/v1/items",
   "api_key": "",
   "api_key_env": "TURKEY_STATION_API_KEY",
   "markets": "土耳其",
@@ -11,10 +11,10 @@
   "chunk_limit": 12000,
   "request_timeout": 20,
   "llm": {
-    "provider": "openai",
-    "model": "gpt-4o",
-    "api_key_env": "TURKEY_BRIEFING_LLM_API_KEY",
-    "base_url": "",
+    "provider": "minimax",
+    "model": "MiniMax-M3",
+    "api_key_env": "MINIMAX_API_KEY",
+    "base_url": "https://api.minimaxi.com/v1",
     "temperature": 0.2,
     "max_tokens": 8000
   }

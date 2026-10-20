@@ -87,7 +87,7 @@ def call_llm(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    if provider == "minimax":
+    if provider == "minimax" and "M3.1" not in model:
         payload["thinking"] = {"type": "disabled"}
 
     payload_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
